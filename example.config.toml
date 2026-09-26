@@ -1,0 +1,13 @@
+"$schema" = "https://raw.githubusercontent.com/luth9r/zap/blob/main/zap.schema.json"
+
+add_newline = "false"
+
+[directory]
+home_symbol = "~"
+home_color = "cyan"
+
+[character]
+success_symbol = "➜"
+success_color = "bold green"
+error_symbol = "X"
+error_color = "bold red"
