@@ -8,9 +8,11 @@ pub const prompt = @import("engine/prompt.zig");
 pub const directory = @import("modules/directory.zig");
 pub const character = @import("modules/character.zig");
 pub const cmd_duration = @import("modules/cmd_duration.zig");
+pub const git_branch = @import("modules/git_branch.zig");
 pub const buffer_writer = @import("utils/buffer_writer.zig");
 pub const path_utils = @import("utils/path_utils.zig");
 pub const color_utils = @import("utils/color_utils.zig");
+pub const git_utils = @import("utils/git_utils.zig");
 
 const Config = config_mod.Config;
 const BufferWriter = buffer_writer.BufferWriter;
@@ -37,6 +39,7 @@ pub fn main(init: std.process.Init) !void {
         .home = home_path,
         .status_code = exec_args.status_code,
         .cmd_duration = exec_args.cmd_duration,
+        .io = init.io,
     });
 
     // Output the rendered prompt buffer in a single syscall

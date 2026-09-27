@@ -6,6 +6,7 @@ const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 const directory_mod = @import("../modules/directory.zig");
 const character_mod = @import("../modules/character.zig");
 const cmd_duration_mod = @import("../modules/cmd_duration.zig");
+const git_branch_mod = @import("../modules/git_branch.zig");
 
 /// Execution context required to render the prompt.
 pub const PromptContext = struct {
@@ -13,6 +14,7 @@ pub const PromptContext = struct {
     home: []const u8,
     status_code: u8 = 0,
     cmd_duration: u64 = 0,
+    io: ?std.Io = null,
 };
 
 /// Orchestrates rendering the complete prompt across all active modules according to the root format string.
@@ -25,6 +27,13 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
     var dir_pos: usize = 0;
     const dir_writer = BufferWriter.init(&dir_buf, &dir_pos);
     try directory_mod.render(dir_writer, config, ctx.cwd, ctx.home);
+
+    var git_buf: [256]u8 = undefined;
+    var git_pos: usize = 0;
+    if (ctx.io) |io| {
+        const git_writer = BufferWriter.init(&git_buf, &git_pos);
+        try git_branch_mod.render(git_writer, config, io, ctx.cwd);
+    }
 
     var dur_buf: [128]u8 = undefined;
     var dur_pos: usize = 0;
@@ -39,6 +48,7 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
     try formatter.formatTemplateWriter(writer, config.format, .{
         .vars = &[_]formatter.Variable{
             .{ .name = "directory", .value = dir_buf[0..dir_pos] },
+            .{ .name = "git_branch", .value = git_buf[0..git_pos] },
             .{ .name = "cmd_duration", .value = dur_buf[0..dur_pos] },
             .{ .name = "character", .value = char_buf[0..char_pos] },
         },

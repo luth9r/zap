@@ -43,9 +43,9 @@
 add_newline = true
 
 # Root prompt format string.
-# Supports modules ($directory, $cmd_duration, $character), multiline strings ("""..."""),
+# Supports modules ($directory, $git_branch, $cmd_duration, $character), multiline strings ("""..."""),
 # styled blocks [content](style), and escaping (\$ for literal '$').
-format = "$directory$cmd_duration$character"
+format = "$directory$git_branch$cmd_duration$character"
 
 [directory]
 format = "[$path]($style)[$read_only]($read_only_style) "
@@ -53,6 +53,14 @@ style = "bold cyan"
 home_symbol = "~"
 read_only = " 󰌾"
 read_only_style = "bold red"
+disabled = false
+
+[git_branch]
+format = "on [$symbol$branch]($style) "
+symbol = " "
+style = "bold purple"
+truncation_length = 0
+truncation_symbol = "…"
 disabled = false
 
 [cmd_duration]

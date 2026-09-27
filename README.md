@@ -78,7 +78,7 @@ zap searches for configuration in:
 add_newline = true
 
 format = """
-[┌─](bold purple)[ X ](bold purple)$directory$cmd_duration
+[┌─](bold purple)[ X ](bold purple)$directory$git_branch$cmd_duration
 [└─](bold purple)[ ⚡ ](bold yellow)$character"""
 
 [directory]
@@ -87,6 +87,14 @@ style = "bold cyan"
 home_symbol = "~"
 read_only = " 󰌾"
 read_only_style = "bold red"
+disabled = false
+
+[git_branch]
+format = "on [$symbol$branch]($style) "
+symbol = " "
+style = "bold purple"
+truncation_length = 0
+truncation_symbol = "…"
 disabled = false
 
 [cmd_duration]
@@ -121,7 +129,7 @@ Styles inside `[text](style)` or module `style` settings support:
 Zap supports a rich template engine for prompt layout and module formatting.
 
 ### Variables & Modules
-* `$directory`, `$cmd_duration`, `$character`, `$path`, `$duration`, `$symbol`, `$style`
+* `$directory`, `$git_branch`, `$cmd_duration`, `$character`, `$path`, `$branch`, `$duration`, `$symbol`, `$style`
 
 ### Escape Character (`\`)
 Use a backslash `\` before any character to escape it and output it literally without triggering template processing:

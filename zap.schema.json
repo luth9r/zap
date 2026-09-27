@@ -56,6 +56,43 @@
         }
       }
     },
+    "git_branch": {
+      "type": "object",
+      "description": "Git branch indicator rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "on [$symbol$branch]($style) ",
+          "description": "Format template for the git_branch module"
+        },
+        "symbol": {
+          "type": "string",
+          "default": " ",
+          "description": "Symbol preceding the git branch name"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold purple",
+          "description": "Style string for the branch text"
+        },
+        "truncation_length": {
+          "type": "integer",
+          "default": 0,
+          "description": "Maximum character length for branch name before truncation (0 = disable)"
+        },
+        "truncation_symbol": {
+          "type": "string",
+          "default": "…",
+          "description": "Symbol appended when branch name is truncated"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the git_branch module"
+        }
+      }
+    },
     "cmd_duration": {
       "type": "object",
       "description": "Execution duration rendering configuration",
