@@ -41,7 +41,7 @@ Add to `~/.config/fish/config.fish`:
 
 ```fish
 function fish_prompt
-    /path/to/zap $status
+    /path/to/zap $status $CMD_DURATION
 end
 ```
 
@@ -51,7 +51,7 @@ Add to `~/.zshrc`:
 
 ```zsh
 setopt PROMPT_SUBST
-PROMPT='$(/path/to/zap $?)'
+PROMPT='$(/path/to/zap $? $CMD_DURATION)'
 ```
 
 ### Bash
@@ -59,7 +59,7 @@ PROMPT='$(/path/to/zap $?)'
 Add to `~/.bashrc`:
 
 ```bash
-PROMPT_COMMAND='PS1="$(/path/to/zap $?)"'
+PROMPT_COMMAND='PS1="$(/path/to/zap $? $CMD_DURATION)"'
 ```
 
 ## Configuration
@@ -78,7 +78,7 @@ zap searches for configuration in:
 add_newline = true
 
 format = """
-[┌─](bold purple)[ X ](bold purple)$directory
+[┌─](bold purple)[ X ](bold purple)$directory$cmd_duration
 [└─](bold purple)[ ⚡ ](bold yellow)$character"""
 
 [directory]
@@ -87,6 +87,13 @@ style = "bold cyan"
 home_symbol = "~"
 read_only = " 󰌾"
 read_only_style = "bold red"
+disabled = false
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration]($style) "
+style = "bold yellow"
+show_milliseconds = false
 disabled = false
 
 [character]
@@ -108,6 +115,39 @@ Styles inside `[text](style)` or module `style` settings support:
 | Hex TrueColor | #RGB or #RRGGBB                                                 | `#fff`, `#bf5700`, `#bd93f9` |
 | ANSI 256      | 0 to 255                                                        | `240`, `fg:27`, `bg:200`     |
 | Prefixes      | fg:color, bg:color                                              | `fg:#50fa7b bg:#282a36`      |
+
+## Format & Templating
+
+Zap supports a rich template engine for prompt layout and module formatting.
+
+### Variables & Modules
+* `$directory`, `$cmd_duration`, `$character`, `$path`, `$duration`, `$symbol`, `$style`
+
+### Escape Character (`\`)
+Use a backslash `\` before any character to escape it and output it literally without triggering template processing:
+
+| Syntax | Output | Description |
+| :--- | :--- | :--- |
+| `\$` | `$` | Literal dollar sign (prevents variable expansion) |
+| `\[` | `[` | Literal open bracket (prevents styled block) |
+| `\]` | `]` | Literal close bracket |
+| `\(` | `(` | Literal open parenthesis (prevents conditional group) |
+| `\)` | `)` | Literal close parenthesis |
+| `\\` | `\` | Literal backslash |
+| `\n` | *(newline)* | Line break |
+| `\t` | *(tab)* | Tabulation |
+
+> **TOML Note:** In TOML strings with double quotes (`"..."`), escape the backslash: `"\\$"`. In single-quoted literal strings (`'...'`), you can write `'\\$'` or `'\$'`.
+
+### Blocks & Grouping
+* **Styled Blocks**: `[text](style)` applies ANSI styling (e.g. `[➜](bold green)` or `[$path]($style)`).
+* **Conditional Groups**: `(content with $var)` renders the inner content only if `$var` is non-empty.
+
+Example with literal `$` in prompt:
+
+```toml
+format = "[$path](bold cyan) \\$ "
+```
 
 ## License
 

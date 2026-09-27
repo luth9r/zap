@@ -12,7 +12,7 @@
     "format": {
       "type": "string",
       "default": "$directory$character",
-      "description": "Root prompt format string controlling module layout and inline styling blocks [content](style)"
+      "description": "Root prompt format string controlling module layout, inline styling blocks [content](style), and escaped characters (e.g. \\$ for literal '$')"
     },
     "add_newline": {
       "type": "boolean",
@@ -53,6 +53,38 @@
           "type": "boolean",
           "default": false,
           "description": "Disables the directory module"
+        }
+      }
+    },
+    "cmd_duration": {
+      "type": "object",
+      "description": "Execution duration rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "min_time": {
+          "type": "integer",
+          "default": 2000,
+          "description": "Minimum execution duration in milliseconds required to render the module"
+        },
+        "format": {
+          "type": "string",
+          "default": "took [$duration]($style) ",
+          "description": "Format template for the cmd_duration module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold yellow",
+          "description": "Style string for the duration text"
+        },
+        "show_milliseconds": {
+          "type": "boolean",
+          "default": false,
+          "description": "Display milliseconds when execution time is under a minute"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the cmd_duration module"
         }
       }
     },

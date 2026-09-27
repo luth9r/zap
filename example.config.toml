@@ -25,15 +25,27 @@
 #    - "bold italic fg:#50fa7b bg:#282a36"
 #    - "underline bg:#bf5700 fg:white"
 #    - "dimmed 240"
+#
+# 5. TEMPLATES & ESCAPING:
+#    - Variable / Module:    $directory, $character, $path, $symbol
+#    - Escape Character (\): Use backslash '\' to escape any special symbol:
+#        * \$  -> literal '$' (write as "\\$" in TOML strings)
+#        * \[  -> literal '[' (not a styled block)
+#        * \]  -> literal ']'
+#        * \(  -> literal '(' (not a conditional group)
+#        * \)  -> literal ')'
+#        * \\  -> literal '\'
+#    - Styled Blocks:        [content](style) (e.g. "[$path](bold cyan)")
+#    - Conditional Blocks:   (prefix $var suffix) - renders only if $var is non-empty
 # ==============================================================================
 
 # Inserts a blank line between shell prompts
 add_newline = true
 
 # Root prompt format string.
-# Supports modules ($directory, $character), multiline strings ("""..."""),
-# and inline styled blocks [content](style).
-format = "$directory$character"
+# Supports modules ($directory, $cmd_duration, $character), multiline strings ("""..."""),
+# styled blocks [content](style), and escaping (\$ for literal '$').
+format = "$directory$cmd_duration$character"
 
 [directory]
 format = "[$path]($style)[$read_only]($read_only_style) "
@@ -41,6 +53,13 @@ style = "bold cyan"
 home_symbol = "~"
 read_only = " 󰌾"
 read_only_style = "bold red"
+disabled = false
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration]($style) "
+style = "bold yellow"
+show_milliseconds = false
 disabled = false
 
 [character]

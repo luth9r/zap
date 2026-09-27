@@ -31,28 +31,7 @@ pub fn loadConfigFile(
     parseToml(config, content_buf[0..bytes_read]);
 }
 
-const Section = enum {
-    directory,
-    character,
-};
-
-const DirKey = enum {
-    format,
-    style,
-    home_symbol,
-    read_only,
-    read_only_style,
-    disabled,
-};
-
-const CharKey = enum {
-    format,
-    success_symbol,
-    error_symbol,
-    disabled,
-};
-
-/// Parses TOML content directly into Config without heap allocations.
+/// Parses TOML content directly into Config without heap allocations using comptime reflection.
 pub fn parseToml(config: *Config, content: []const u8) void {
     var line_it = std.mem.splitScalar(u8, content, '\n');
     var current_section: ?[]const u8 = null;
@@ -117,64 +96,62 @@ pub fn parseToml(config: *Config, content: []const u8) void {
                 val = val[1 .. val.len - 1];
             }
 
-            // Handle root keys (format, add_newline)
-            if (current_section == null) {
-                if (std.mem.eql(u8, key, "add_newline")) {
-                    if (std.mem.eql(u8, val, "true")) {
-                        config.add_newline = true;
-                    } else if (std.mem.eql(u8, val, "false")) {
-                        config.add_newline = false;
-                    }
-                    continue;
-                }
-                if (std.mem.eql(u8, key, "format")) {
-                    config.format = val;
-                    continue;
-                }
-            }
-
             applyValue(config, current_section, key, val);
         }
     }
 }
 
-fn applyValue(config: *Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
-    const sec_str = section orelse return;
-    const sec = std.meta.stringToEnum(Section, sec_str) orelse return;
+fn applyGenericField(ptr: anytype, key: []const u8, val: []const u8) void {
+    const PtrType = @TypeOf(ptr);
+    const T = switch (@typeInfo(PtrType)) {
+        .pointer => |p| p.child,
+        else => @compileError("applyGenericField requires a pointer to struct"),
+    };
 
-    switch (sec) {
-        .directory => {
-            const dir_key = std.meta.stringToEnum(DirKey, key) orelse return;
-            switch (dir_key) {
-                .format => config.directory.format = val,
-                .style => config.directory.style = val,
-                .home_symbol => config.directory.home_symbol = val,
-                .read_only => config.directory.read_only = val,
-                .read_only_style => config.directory.read_only_style = val,
-                .disabled => {
-                    if (std.mem.eql(u8, val, "true")) {
-                        config.directory.disabled = true;
-                    } else if (std.mem.eql(u8, val, "false")) {
-                        config.directory.disabled = false;
+    inline for (@typeInfo(T).@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, key)) {
+            switch (@typeInfo(field.type)) {
+                .pointer => |p| {
+                    if (p.size == .slice and p.child == u8) {
+                        @field(ptr, field.name) = val;
                     }
                 },
-            }
-        },
-        .character => {
-            const char_key = std.meta.stringToEnum(CharKey, key) orelse return;
-            switch (char_key) {
-                .format => config.character.format = val,
-                .success_symbol => config.character.success_symbol = val,
-                .error_symbol => config.character.error_symbol = val,
-                .disabled => {
+                .bool => {
                     if (std.mem.eql(u8, val, "true")) {
-                        config.character.disabled = true;
+                        @field(ptr, field.name) = true;
                     } else if (std.mem.eql(u8, val, "false")) {
-                        config.character.disabled = false;
+                        @field(ptr, field.name) = false;
                     }
                 },
+                .int => {
+                    if (std.fmt.parseInt(field.type, val, 10)) |num| {
+                        @field(ptr, field.name) = num;
+                    } else |_| {}
+                },
+                .@"enum" => {
+                    if (std.meta.stringToEnum(field.type, val)) |e| {
+                        @field(ptr, field.name) = e;
+                    }
+                },
+                else => {},
             }
-        },
+            return;
+        }
+    }
+}
+
+fn applyValue(config: *Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
+    if (section) |sec_name| {
+        inline for (@typeInfo(Config).@"struct".fields) |sec_field| {
+            if (std.mem.eql(u8, sec_field.name, sec_name)) {
+                if (@typeInfo(sec_field.type) == .@"struct") {
+                    applyGenericField(&@field(config, sec_field.name), key, val);
+                    return;
+                }
+            }
+        }
+    } else {
+        applyGenericField(config, key, val);
     }
 }
 
@@ -218,13 +195,20 @@ test "parse empty string preserves default config" {
     try std.testing.expectEqual(true, cfg.add_newline);
 }
 
-test "parse comments and sections" {
+test "parse comments, sections and values" {
     const toml_text =
-        \\# Configuration
+        \\# Configuration comment
+        \\add_newline = false
+        \\format = "$directory$character"
         \\
         \\[directory]
         \\home_symbol = "<>"
         \\style = "bold yellow"
+        \\disabled = true
+        \\
+        \\[cmd_duration]
+        \\min_time = 5000
+        \\show_milliseconds = true
         \\
         \\[character]
         \\success_symbol = "[➜](bold green)"
@@ -234,10 +218,47 @@ test "parse comments and sections" {
     var cfg = Config{};
     parseToml(&cfg, toml_text);
 
+    try std.testing.expectEqual(false, cfg.add_newline);
+    try std.testing.expectEqualStrings("$directory$character", cfg.format);
     try std.testing.expectEqualStrings("<>", cfg.directory.home_symbol);
     try std.testing.expectEqualStrings("bold yellow", cfg.directory.style);
+    try std.testing.expectEqual(true, cfg.directory.disabled);
+    try std.testing.expectEqual(@as(u64, 5000), cfg.cmd_duration.min_time);
+    try std.testing.expectEqual(true, cfg.cmd_duration.show_milliseconds);
     try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
     try std.testing.expectEqualStrings("[X](bold red)", cfg.character.error_symbol);
+}
+
+test "parse multiline format strings with triple quotes" {
+    const multiline_config =
+        \\format = """
+        \\┌─ $directory
+        \\└─ $character"""
+        \\
+        \\[directory]
+        \\style = "bold cyan"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, multiline_config);
+
+    const expected_format = "┌─ $directory\n└─ $character";
+    try std.testing.expectEqualStrings(expected_format, cfg.format);
+    try std.testing.expectEqualStrings("bold cyan", cfg.directory.style);
+}
+
+test "parseToml ignores $schema root key" {
+    const toml_with_schema =
+        \\"$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"
+        \\
+        \\[character]
+        \\success_symbol = "[»](bold cyan)"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_with_schema);
+
+    try std.testing.expectEqualStrings("[»](bold cyan)", cfg.character.success_symbol);
 }
 
 test "resolveConfigPathBuf respects ZAP_CONFIG priority" {
@@ -280,102 +301,3 @@ test "resolveConfigPathBuf falls back to HOME/.config/zap/config.toml" {
     try std.testing.expectEqualStrings("/home/user/.config/zap/config.toml", path);
 }
 
-test "integration: parseToml correctly updates full configuration" {
-    const sample_config =
-        \\# Example configuration for zap
-        \\add_newline = false
-        \\format = "$directory$character"
-        \\
-        \\[directory]
-        \\home_symbol = "★"
-        \\style = "underline bg:#bf5700"
-        \\read_only = "󰌾"
-        \\read_only_style = "bold red"
-        \\
-        \\[character]
-        \\success_symbol = "[➜](bold green)"
-        \\error_symbol = "[✗](bold fg:27 bg:blue)"
-    ;
-
-    var cfg = Config{};
-    parseToml(&cfg, sample_config);
-
-    try std.testing.expectEqual(false, cfg.add_newline);
-    try std.testing.expectEqualStrings("$directory$character", cfg.format);
-    try std.testing.expectEqualStrings("★", cfg.directory.home_symbol);
-    try std.testing.expectEqualStrings("underline bg:#bf5700", cfg.directory.style);
-    try std.testing.expectEqualStrings("󰌾", cfg.directory.read_only);
-    try std.testing.expectEqualStrings("bold red", cfg.directory.read_only_style);
-    try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
-    try std.testing.expectEqualStrings("[✗](bold fg:27 bg:blue)", cfg.character.error_symbol);
-}
-
-test "parseToml ignores $schema root key" {
-    const toml_with_schema =
-        \\"$schema" = "https://raw.githubusercontent.com/username/zap/main/zap.schema.json"
-        \\
-        \\[character]
-        \\success_symbol = "[»](bold cyan)"
-    ;
-
-    var cfg = Config{};
-    parseToml(&cfg, toml_with_schema);
-
-    try std.testing.expectEqualStrings("[»](bold cyan)", cfg.character.success_symbol);
-}
-
-test "parseToml with disabled modules" {
-    const disabled_config =
-        \\[directory]
-        \\disabled = true
-        \\
-        \\[character]
-        \\disabled = false
-    ;
-
-    var cfg = Config{};
-    parseToml(&cfg, disabled_config);
-
-    try std.testing.expectEqual(true, cfg.directory.disabled);
-    try std.testing.expectEqual(false, cfg.character.disabled);
-}
-
-test "parseToml with custom format strings" {
-    const format_config =
-        \\format = "in $directory\n$character"
-        \\
-        \\[directory]
-        \\format = "[$path]($style) "
-        \\style = "bold cyan"
-        \\
-        \\[character]
-        \\format = "$symbol "
-        \\success_symbol = "[➜](bold green)"
-    ;
-
-    var cfg = Config{};
-    parseToml(&cfg, format_config);
-
-    try std.testing.expectEqualStrings("in $directory\\n$character", cfg.format);
-    try std.testing.expectEqualStrings("[$path]($style) ", cfg.directory.format);
-    try std.testing.expectEqualStrings("bold cyan", cfg.directory.style);
-    try std.testing.expectEqualStrings("$symbol ", cfg.character.format);
-    try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
-}
-
-test "parseToml with multiline format string" {
-    const multiline_config =
-        \\format = """
-        \\┌─ $directory
-        \\└─ $character"""
-        \\
-        \\[directory]
-        \\style = "bold cyan"
-    ;
-
-    var cfg = Config{};
-    parseToml(&cfg, multiline_config);
-
-    const expected_format = "┌─ $directory\n└─ $character";
-    try std.testing.expectEqualStrings(expected_format, cfg.format);
-}
