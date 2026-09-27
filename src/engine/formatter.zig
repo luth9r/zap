@@ -58,6 +58,15 @@ pub fn formatTemplateWriter(
             i += 2;
             continue;
         }
+        if (template[i] == '(') {
+            if (parseConditionalGroup(template, i)) |cond| {
+                if (shouldRenderConditionalGroup(cond.inner, ctx)) {
+                    try formatTemplateWriter(writer, cond.inner, ctx);
+                }
+                i = cond.next_index;
+                continue;
+            }
+        }
         if (template[i] == '[') {
             if (parseStyledGroup(template, i)) |group| {
                 try renderStyledGroup(writer, group.content, group.style_spec, ctx);
@@ -187,8 +196,13 @@ fn renderStyledGroup(
     if (isGroupContentEmpty(content_raw, ctx)) return;
 
     var resolved_style = style_spec;
-    if (std.mem.eql(u8, std.mem.trim(u8, style_spec, " \t"), "$style")) {
-        resolved_style = ctx.style;
+    const trimmed_spec = std.mem.trim(u8, style_spec, " \t");
+    if (std.mem.startsWith(u8, trimmed_spec, "$")) {
+        if (ctx.get(trimmed_spec[1..])) |val| {
+            resolved_style = val;
+        } else if (std.mem.eql(u8, trimmed_spec, "$style")) {
+            resolved_style = ctx.style;
+        }
     }
 
     var style_buf: [64]u8 = undefined;
@@ -316,6 +330,18 @@ const ConditionalGroup = struct {
     next_index: usize,
 };
 
+fn containsVarOrStyled(inner: []const u8) bool {
+    var i: usize = 0;
+    while (i < inner.len) : (i += 1) {
+        if (inner[i] == '\\' and i + 1 < inner.len) {
+            i += 1;
+            continue;
+        }
+        if (inner[i] == '$' or inner[i] == '[') return true;
+    }
+    return false;
+}
+
 fn parseConditionalGroup(raw: []const u8, start_idx: usize) ?ConditionalGroup {
     if (raw[start_idx] != '(') return null;
 
@@ -332,8 +358,10 @@ fn parseConditionalGroup(raw: []const u8, start_idx: usize) ?ConditionalGroup {
         } else if (raw[i] == ')') {
             depth -= 1;
             if (depth == 0) {
+                const inner = raw[start_idx + 1 .. i];
+                if (!containsVarOrStyled(inner)) return null;
                 return ConditionalGroup{
-                    .inner = raw[start_idx + 1 .. i],
+                    .inner = inner,
                     .next_index = i + 1,
                 };
             }

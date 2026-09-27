@@ -229,6 +229,81 @@ test "parse comments, sections and values" {
     try std.testing.expectEqualStrings("[X](bold red)", cfg.character.error_symbol);
 }
 
+test "parse git_branch and git_status sections" {
+    const toml_text =
+        \\[git_branch]
+        \\symbol = "󰘬 "
+        \\style = "bold purple"
+        \\truncation_length = 15
+        \\truncation_symbol = "…"
+        \\
+        \\[git_status]
+        \\style = "bold red"
+        \\staged = "[+]"
+        \\modified = "[!]"
+        \\ahead = "UP "
+        \\behind = "DOWN "
+        \\disabled = false
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqualStrings("󰘬 ", cfg.git_branch.symbol);
+    try std.testing.expectEqualStrings("bold purple", cfg.git_branch.style);
+    try std.testing.expectEqual(@as(usize, 15), cfg.git_branch.truncation_length);
+    try std.testing.expectEqualStrings("…", cfg.git_branch.truncation_symbol);
+
+    try std.testing.expectEqualStrings("bold red", cfg.git_status.style);
+    try std.testing.expectEqualStrings("[+]", cfg.git_status.staged);
+    try std.testing.expectEqualStrings("[!]", cfg.git_status.modified);
+    try std.testing.expectEqualStrings("UP ", cfg.git_status.ahead);
+    try std.testing.expectEqualStrings("DOWN ", cfg.git_status.behind);
+    try std.testing.expectEqual(false, cfg.git_status.disabled);
+}
+
+test "parse git_commit, git_state and git_metrics sections" {
+    const toml_text =
+        \\[git_commit]
+        \\style = "bold green"
+        \\commit_hash_length = 8
+        \\only_detached = false
+        \\tag_symbol = " # "
+        \\tag_disabled = false
+        \\
+        \\[git_state]
+        \\style = "bold yellow"
+        \\rebase = "REBASE-IN-PROGRESS"
+        \\merge = "MERGE-CONFLICT"
+        \\disabled = false
+        \\
+        \\[git_metrics]
+        \\added_style = "green"
+        \\deleted_style = "red"
+        \\only_nonzero_diffs = false
+        \\disabled = false
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqualStrings("bold green", cfg.git_commit.style);
+    try std.testing.expectEqual(@as(usize, 8), cfg.git_commit.commit_hash_length);
+    try std.testing.expectEqual(false, cfg.git_commit.only_detached);
+    try std.testing.expectEqualStrings(" # ", cfg.git_commit.tag_symbol);
+    try std.testing.expectEqual(false, cfg.git_commit.tag_disabled);
+
+    try std.testing.expectEqualStrings("bold yellow", cfg.git_state.style);
+    try std.testing.expectEqualStrings("REBASE-IN-PROGRESS", cfg.git_state.rebase);
+    try std.testing.expectEqualStrings("MERGE-CONFLICT", cfg.git_state.merge);
+    try std.testing.expectEqual(false, cfg.git_state.disabled);
+
+    try std.testing.expectEqualStrings("green", cfg.git_metrics.added_style);
+    try std.testing.expectEqualStrings("red", cfg.git_metrics.deleted_style);
+    try std.testing.expectEqual(false, cfg.git_metrics.only_nonzero_diffs);
+    try std.testing.expectEqual(false, cfg.git_metrics.disabled);
+}
+
 test "parse multiline format strings with triple quotes" {
     const multiline_config =
         \\format = """

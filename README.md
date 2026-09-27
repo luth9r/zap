@@ -78,7 +78,7 @@ zap searches for configuration in:
 add_newline = true
 
 format = """
-[┌─](bold purple)[ X ](bold purple)$directory$git_branch$cmd_duration
+[┌─](bold purple)[ X ](bold purple)$directory$git_branch$git_commit$git_state$git_status$git_metrics$cmd_duration
 [└─](bold purple)[ ⚡ ](bold yellow)$character"""
 
 [directory]
@@ -87,15 +87,38 @@ style = "bold cyan"
 home_symbol = "~"
 read_only = " 󰌾"
 read_only_style = "bold red"
+truncation_length = 3
+truncation_symbol = "…/"
+truncate_to_repo = true
 disabled = false
 
 [git_branch]
 format = "on [$symbol$branch]($style) "
-symbol = " "
+symbol = " "
 style = "bold purple"
 truncation_length = 0
 truncation_symbol = "…"
 disabled = false
+
+[git_commit]
+format = "[\\($hash$tag\\)]($style) "
+style = "bold green"
+only_detached = true
+disabled = false
+
+[git_state]
+format = "\\([$state( $progress_current/$progress_total)]($style)\\) "
+style = "bold yellow"
+disabled = false
+
+[git_status]
+format = "([\\[$all_status$ahead_behind\\]]($style) )"
+style = "bold red"
+disabled = false
+
+[git_metrics]
+format = "([+$added]($added_style) )([-$deleted]($deleted_style) )"
+disabled = true
 
 [cmd_duration]
 min_time = 2000
@@ -129,7 +152,8 @@ Styles inside `[text](style)` or module `style` settings support:
 Zap supports a rich template engine for prompt layout and module formatting.
 
 ### Variables & Modules
-* `$directory`, `$git_branch`, `$cmd_duration`, `$character`, `$path`, `$branch`, `$duration`, `$symbol`, `$style`
+* **Modules**: `$directory`, `$git_branch`, `$git_commit`, `$git_state`, `$git_status`, `$git_metrics`, `$cmd_duration`, `$character`
+* **Module inner variables**: `$path`, `$branch`, `$remote_branch`, `$hash`, `$tag`, `$state`, `$progress_current`, `$progress_total`, `$all_status`, `$ahead_behind`, `$staged`, `$modified`, `$untracked`, `$renamed`, `$deleted`, `$stashed`, `$added`, `$deleted`, `$duration`, `$symbol`, `$style`
 
 ### Escape Character (`\`)
 Use a backslash `\` before any character to escape it and output it literally without triggering template processing:

@@ -3,6 +3,8 @@ const Config = @import("../config/config.zig").Config;
 const formatter = @import("../engine/formatter.zig");
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 
+pub const PromptContext = @import("../engine/context.zig").PromptContext;
+
 pub const CharacterConfig = struct {
     // Format string used to render the character module.
     format: []const u8 = "$symbol ",
@@ -18,11 +20,11 @@ pub const CharacterConfig = struct {
 pub fn render(
     writer: anytype,
     config: Config,
-    status_code: u8,
+    ctx: PromptContext,
 ) !void {
     if (config.character.disabled) return;
 
-    const is_error = status_code != 0;
+    const is_error = ctx.status_code != 0;
     const symbol_template = if (is_error) config.character.error_symbol else config.character.success_symbol;
 
     var symbol_buf: [256]u8 = undefined;
@@ -46,7 +48,7 @@ test "render character success exit code" {
     const writer = BufferWriter.init(&buf, &pos);
 
     const cfg = Config{};
-    try render(writer, cfg, 0);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
 
     const expected = "\x1b[1;32m❯\x1b[0m ";
     try std.testing.expectEqualStrings(expected, buf[0..pos]);
@@ -58,7 +60,7 @@ test "render character error exit code" {
     const writer = BufferWriter.init(&buf, &pos);
 
     const cfg = Config{};
-    try render(writer, cfg, 1);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 1 });
 
     const expected = "\x1b[1;31m❯\x1b[0m ";
     try std.testing.expectEqualStrings(expected, buf[0..pos]);
@@ -71,7 +73,7 @@ test "render character disabled" {
 
     var cfg = Config{};
     cfg.character.disabled = true;
-    try render(writer, cfg, 0);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
 
     try std.testing.expectEqual(@as(usize, 0), pos);
 }
@@ -85,10 +87,10 @@ test "render character custom symbols" {
     cfg.character.success_symbol = "[➜](bold green)";
     cfg.character.error_symbol = "[✗](bold red)";
 
-    try render(writer, cfg, 0);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
     try std.testing.expectEqualStrings("\x1b[1;32m➜\x1b[0m ", buf[0..pos]);
 
     pos = 0;
-    try render(writer, cfg, 130);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 130 });
     try std.testing.expectEqualStrings("\x1b[1;31m✗\x1b[0m ", buf[0..pos]);
 }

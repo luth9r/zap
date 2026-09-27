@@ -49,6 +49,21 @@
           "default": "bold red",
           "description": "Style string for the read-only symbol"
         },
+        "truncation_length": {
+          "type": "integer",
+          "default": 3,
+          "description": "Number of directory path segments to display before truncation (0 = disable)"
+        },
+        "truncation_symbol": {
+          "type": "string",
+          "default": "…/",
+          "description": "Symbol replacing truncated parent directory path segments"
+        },
+        "truncate_to_repo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to truncate path relative to the root of the current Git repository"
+        },
         "disabled": {
           "type": "boolean",
           "default": false,
@@ -68,7 +83,7 @@
         },
         "symbol": {
           "type": "string",
-          "default": " ",
+          "default": " ",
           "description": "Symbol preceding the git branch name"
         },
         "style": {
@@ -90,6 +105,214 @@
           "type": "boolean",
           "default": false,
           "description": "Disables the git_branch module"
+        }
+      }
+    },
+    "git_commit": {
+      "type": "object",
+      "description": "Git commit hash and tag rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "[\\($hash$tag\\)]($style) ",
+          "description": "Format template for the git_commit module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold green",
+          "description": "Style string for the commit hash and tag"
+        },
+        "commit_hash_length": {
+          "type": "integer",
+          "default": 7,
+          "description": "Number of characters to display from the commit hash (0 = full SHA)"
+        },
+        "only_detached": {
+          "type": "boolean",
+          "default": true,
+          "description": "Only display git_commit when HEAD is detached"
+        },
+        "tag_symbol": {
+          "type": "string",
+          "default": "  ",
+          "description": "Symbol preceding tag name"
+        },
+        "tag_disabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to disable tag display"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the git_commit module"
+        }
+      }
+    },
+    "git_state": {
+      "type": "object",
+      "description": "Git operation state (merge, rebase, cherry-pick) rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "\\([$state( $progress_current/$progress_total)]($style)\\) ",
+          "description": "Format template for the git_state module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold yellow",
+          "description": "Style string for the state text"
+        },
+        "rebase": {
+          "type": "string",
+          "default": "REBASING",
+          "description": "Label shown when a rebase is in progress"
+        },
+        "merge": {
+          "type": "string",
+          "default": "MERGING",
+          "description": "Label shown when a merge is in progress"
+        },
+        "revert": {
+          "type": "string",
+          "default": "REVERTING",
+          "description": "Label shown when a revert is in progress"
+        },
+        "cherry_pick": {
+          "type": "string",
+          "default": "CHERRY-PICKING",
+          "description": "Label shown when a cherry-pick is in progress"
+        },
+        "bisect": {
+          "type": "string",
+          "default": "BISECTING",
+          "description": "Label shown when a bisect is in progress"
+        },
+        "am": {
+          "type": "string",
+          "default": "AM",
+          "description": "Label shown when applying mailbox patches"
+        },
+        "am_or_rebase": {
+          "type": "string",
+          "default": "AM/REBASE",
+          "description": "Label shown when applying mailbox patches or rebasing"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the git_state module"
+        }
+      }
+    },
+    "git_status": {
+      "type": "object",
+      "description": "Git status indicator rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "([\\[$all_status$ahead_behind\\]]($style) )",
+          "description": "Format template for the git_status module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold red",
+          "description": "Style string for status indicators"
+        },
+        "staged": {
+          "type": "string",
+          "default": "+",
+          "description": "Symbol shown when changes are staged"
+        },
+        "modified": {
+          "type": "string",
+          "default": "!",
+          "description": "Symbol shown when files are modified"
+        },
+        "untracked": {
+          "type": "string",
+          "default": "?",
+          "description": "Symbol shown when untracked files exist"
+        },
+        "renamed": {
+          "type": "string",
+          "default": "»",
+          "description": "Symbol shown when files are renamed"
+        },
+        "deleted": {
+          "type": "string",
+          "default": "✘",
+          "description": "Symbol shown when files are deleted"
+        },
+        "stashed": {
+          "type": "string",
+          "default": "$",
+          "description": "Symbol shown when stashed changes exist"
+        },
+        "ahead": {
+          "type": "string",
+          "default": "⇡",
+          "description": "Symbol shown when local branch is ahead of remote"
+        },
+        "behind": {
+          "type": "string",
+          "default": "⇣",
+          "description": "Symbol shown when local branch is behind remote"
+        },
+        "diverged": {
+          "type": "string",
+          "default": "⇕",
+          "description": "Symbol shown when local and remote branches have diverged"
+        },
+        "conflicted": {
+          "type": "string",
+          "default": "=",
+          "description": "Symbol shown when merge conflicts exist"
+        },
+        "up_to_date": {
+          "type": "string",
+          "default": "",
+          "description": "Symbol shown when repository is clean and up to date"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the git_status module"
+        }
+      }
+    },
+    "git_metrics": {
+      "type": "object",
+      "description": "Git additions/deletions line metrics rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "([+$added]($added_style) )([-$deleted]($deleted_style) )",
+          "description": "Format template for the git_metrics module"
+        },
+        "added_style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold green",
+          "description": "Style string for added lines"
+        },
+        "deleted_style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold red",
+          "description": "Style string for deleted lines"
+        },
+        "only_nonzero_diffs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Only render metrics when diffs are non-zero"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Disables the git_metrics module (default = true for latency)"
         }
       }
     },

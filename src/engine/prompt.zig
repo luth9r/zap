@@ -3,55 +3,41 @@ const testing = std.testing;
 const Config = @import("../config/config.zig").Config;
 const formatter = @import("formatter.zig");
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-const directory_mod = @import("../modules/directory.zig");
-const character_mod = @import("../modules/character.zig");
-const cmd_duration_mod = @import("../modules/cmd_duration.zig");
-const git_branch_mod = @import("../modules/git_branch.zig");
+pub const PromptContext = @import("context.zig").PromptContext;
+pub const modules = @import("../modules/registry.zig");
 
-/// Execution context required to render the prompt.
-pub const PromptContext = struct {
-    cwd: []const u8,
-    home: []const u8,
-    status_code: u8 = 0,
-    cmd_duration: u64 = 0,
-    io: ?std.Io = null,
-};
+fn isModuleRequested(format: []const u8, comptime name: []const u8) bool {
+    return std.mem.indexOf(u8, format, "$" ++ name) != null;
+}
 
-/// Orchestrates rendering the complete prompt across all active modules according to the root format string.
+/// Orchestrates rendering the complete prompt across all active modules using comptime reflection.
 pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
     if (config.add_newline) {
         try writer.writeByte('\n');
     }
 
-    var dir_buf: [std.fs.max_path_bytes + 256]u8 = undefined;
-    var dir_pos: usize = 0;
-    const dir_writer = BufferWriter.init(&dir_buf, &dir_pos);
-    try directory_mod.render(dir_writer, config, ctx.cwd, ctx.home);
+    const decls = @typeInfo(modules).@"struct".decls;
+    var vars: [decls.len]formatter.Variable = undefined;
 
-    var git_buf: [256]u8 = undefined;
-    var git_pos: usize = 0;
-    if (ctx.io) |io| {
-        const git_writer = BufferWriter.init(&git_buf, &git_pos);
-        try git_branch_mod.render(git_writer, config, io, ctx.cwd);
+    inline for (decls, 0..) |decl, i| {
+        const mod = @field(modules, decl.name);
+        const buf_size = if (@hasDecl(mod, "buffer_size")) mod.buffer_size else 512;
+        var buf: [buf_size]u8 = undefined;
+        var pos: usize = 0;
+
+        if (isModuleRequested(config.format, decl.name)) {
+            const mod_writer = BufferWriter.init(&buf, &pos);
+            try mod.render(mod_writer, config, ctx);
+        }
+
+        vars[i] = .{
+            .name = decl.name,
+            .value = buf[0..pos],
+        };
     }
 
-    var dur_buf: [128]u8 = undefined;
-    var dur_pos: usize = 0;
-    const dur_writer = BufferWriter.init(&dur_buf, &dur_pos);
-    try cmd_duration_mod.render(dur_writer, config, ctx.cmd_duration);
-
-    var char_buf: [512]u8 = undefined;
-    var char_pos: usize = 0;
-    const char_writer = BufferWriter.init(&char_buf, &char_pos);
-    try character_mod.render(char_writer, config, ctx.status_code);
-
     try formatter.formatTemplateWriter(writer, config.format, .{
-        .vars = &[_]formatter.Variable{
-            .{ .name = "directory", .value = dir_buf[0..dir_pos] },
-            .{ .name = "git_branch", .value = git_buf[0..git_pos] },
-            .{ .name = "cmd_duration", .value = dur_buf[0..dur_pos] },
-            .{ .name = "character", .value = char_buf[0..char_pos] },
-        },
+        .vars = &vars,
     });
 }
 
@@ -188,5 +174,50 @@ test "render prompt with cmd_duration module" {
     try render(writer, cfg, ctx2);
     const expected2 = "\x1b[1;36m~/zap\x1b[0m \x1b[1;32m❯\x1b[0m ";
     try testing.expectEqualStrings(expected2, buf[0..pos]);
+}
+
+test "render prompt with git_status module variables" {
+    var buf: [1024]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+    var cfg = Config{};
+    cfg.add_newline = false;
+    cfg.format = "$directory$git_branch$git_status$character";
+
+    try formatter.formatTemplateWriter(writer, cfg.format, .{
+        .vars = &[_]formatter.Variable{
+            .{ .name = "directory", .value = "\x1b[1;36m~/zap\x1b[0m " },
+            .{ .name = "git_branch", .value = "on \x1b[1;35mmain\x1b[0m " },
+            .{ .name = "git_status", .value = "\x1b[1;31m[!+]\x1b[0m " },
+            .{ .name = "character", .value = "\x1b[1;32m❯\x1b[0m " },
+        },
+    });
+
+    const expected = "\x1b[1;36m~/zap\x1b[0m on \x1b[1;35mmain\x1b[0m \x1b[1;31m[!+]\x1b[0m \x1b[1;32m❯\x1b[0m ";
+    try testing.expectEqualStrings(expected, buf[0..pos]);
+}
+
+test "render prompt with all git modules in root format" {
+    var buf: [1024]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+    var cfg = Config{};
+    cfg.add_newline = false;
+    cfg.format = "$directory$git_branch$git_commit$git_state$git_status$git_metrics$character";
+
+    try formatter.formatTemplateWriter(writer, cfg.format, .{
+        .vars = &[_]formatter.Variable{
+            .{ .name = "directory", .value = "\x1b[1;36m~/zap\x1b[0m " },
+            .{ .name = "git_branch", .value = "on \x1b[1;35mmain\x1b[0m " },
+            .{ .name = "git_commit", .value = "\x1b[1;32m(4cd65cc)\x1b[0m " },
+            .{ .name = "git_state", .value = "(\x1b[1;33mREBASING 1/3\x1b[0m) " },
+            .{ .name = "git_status", .value = "\x1b[1;31m[!+]\x1b[0m " },
+            .{ .name = "git_metrics", .value = "\x1b[1;32m+10\x1b[0m \x1b[1;31m-2\x1b[0m " },
+            .{ .name = "character", .value = "\x1b[1;32m❯\x1b[0m " },
+        },
+    });
+
+    const expected = "\x1b[1;36m~/zap\x1b[0m on \x1b[1;35mmain\x1b[0m \x1b[1;32m(4cd65cc)\x1b[0m (\x1b[1;33mREBASING 1/3\x1b[0m) \x1b[1;31m[!+]\x1b[0m \x1b[1;32m+10\x1b[0m \x1b[1;31m-2\x1b[0m \x1b[1;32m❯\x1b[0m ";
+    try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 

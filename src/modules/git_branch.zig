@@ -3,11 +3,13 @@ const Config = @import("../config/config.zig").Config;
 const formatter = @import("../engine/formatter.zig");
 const git_utils = @import("../utils/git_utils.zig");
 
+pub const PromptContext = @import("../engine/context.zig").PromptContext;
+
 pub const GitBranchConfig = struct {
     // Format template for the git_branch module.
     format: []const u8 = "on [$symbol$branch]($style) ",
     // Symbol preceding the git branch name.
-    symbol: []const u8 = " ",
+    symbol: []const u8 = " ",
     // Style string for the branch text.
     style: []const u8 = "bold purple",
     // Maximum character length for branch name before truncation (0 = disable).
@@ -35,15 +37,15 @@ pub fn truncateBranch(
 pub fn render(
     writer: anytype,
     config: Config,
-    io: std.Io,
-    cwd: []const u8,
+    ctx: PromptContext,
 ) !void {
     if (config.git_branch.disabled) return;
+    const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     var head_buf: [512]u8 = undefined;
 
-    const raw_branch = git_utils.getGitBranch(io, cwd, &git_dir_buf, &head_buf) orelse return;
+    const raw_branch = git_utils.getGitBranch(io, ctx.cwd, &git_dir_buf, &head_buf) orelse return;
 
     var trunc_buf: [256]u8 = undefined;
     const branch_str = truncateBranch(
@@ -114,8 +116,7 @@ test "render git_branch disabled" {
     const writer = BufferWriter.init(&buf, &pos);
 
     // Should return immediately without any output or IO calls
-    const mock_io: std.Io = undefined;
-    try render(writer, cfg, mock_io, "/some/path");
+    try render(writer, cfg, .{ .cwd = "/some/path", .home = "." });
 
     try std.testing.expectEqual(@as(usize, 0), pos);
 }

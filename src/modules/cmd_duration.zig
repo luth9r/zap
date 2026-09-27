@@ -2,6 +2,8 @@ const std = @import("std");
 const Config = @import("../config/config.zig").Config;
 const formatter = @import("../engine/formatter.zig");
 
+pub const PromptContext = @import("../engine/context.zig").PromptContext;
+
 pub const CmdDurationConfig = struct {
     // Minimum execution duration in milliseconds to trigger rendering.
     min_time: u64 = 2000,
@@ -65,13 +67,13 @@ pub fn formatDurationBuf(buf: []u8, duration_ms: u64, show_milliseconds: bool) ?
 pub fn render(
     writer: anytype,
     config: Config,
-    duration_ms: u64,
+    ctx: PromptContext,
 ) !void {
     if (config.cmd_duration.disabled) return;
-    if (duration_ms < config.cmd_duration.min_time) return;
+    if (ctx.cmd_duration < config.cmd_duration.min_time) return;
 
     var dur_buf: [64]u8 = undefined;
-    const dur_str = formatDurationBuf(&dur_buf, duration_ms, config.cmd_duration.show_milliseconds) orelse return;
+    const dur_str = formatDurationBuf(&dur_buf, ctx.cmd_duration, config.cmd_duration.show_milliseconds) orelse return;
 
     try formatter.formatTemplateWriter(writer, config.cmd_duration.format, .{
         .style = config.cmd_duration.style,
@@ -115,11 +117,11 @@ test "render duration respect min_time" {
     const writer = BufferWriter.init(&buf, &pos);
 
     // Below min_time -> no output
-    try render(writer, cfg, 1999);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 1999 });
     try std.testing.expectEqual(@as(usize, 0), pos);
 
     // At min_time -> rendered
-    try render(writer, cfg, 2000);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 2000 });
     try std.testing.expectEqualStrings("took \x1b[1;33m2s\x1b[0m ", buf[0..pos]);
 }
 
@@ -134,6 +136,6 @@ test "render duration disabled" {
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
 
-    try render(writer, cfg, 5000);
+    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 5000 });
     try std.testing.expectEqual(@as(usize, 0), pos);
 }
