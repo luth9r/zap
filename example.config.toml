@@ -1,13 +1,50 @@
 "$schema" = "https://raw.githubusercontent.com/luth9r/zap/blob/main/zap.schema.json"
 
-add_newline = "false"
+# ==============================================================================
+# ZAP CONFIGURATION CHEATSHEET & EXAMPLES
+# ==============================================================================
+#
+# 1. TEXT MODIFIERS:
+#    - bold, dimmed (or dim), italic, underline (or underlined),
+#    - blink, inverted (or invert), hidden, strikethrough, reset, none
+#
+# 2. NAMED COLORS:
+#    - Standard: black, red, green, yellow, blue, magenta, purple, cyan, white
+#    - Bright:   bright-black (gray, grey), bright-red, bright-green,
+#                bright-yellow, bright-blue, bright-magenta, bright-purple,
+#                bright-cyan, bright-white
+#
+# 3. ADVANCED COLORS & PREFIXES:
+#    - Foreground:  fg:<color> (e.g. fg:cyan, fg:27, fg:#50fa7b)
+#    - Background:  bg:<color> (e.g. bg:blue, bg:200, bg:#282a36)
+#    - Hex TrueColor: #RGB or #RRGGBB (e.g. #fff, #bf5700, #bd93f9)
+#    - ANSI 256:      0 - 255 (e.g. 240, fg:27, bg:235)
+#
+# 4. COMBINED STYLE STRINGS:
+#    - "bold cyan"
+#    - "bold italic fg:#50fa7b bg:#282a36"
+#    - "underline bg:#bf5700 fg:white"
+#    - "dimmed 240"
+# ==============================================================================
+
+# Inserts a blank line between shell prompts
+add_newline = true
+
+# Root prompt format string.
+# Supports modules ($directory, $character), multiline strings ("""..."""),
+# and inline styled blocks [content](style).
+format = "$directory$character"
 
 [directory]
+format = "[$path]($style)[$read_only]($read_only_style) "
+style = "bold cyan"
 home_symbol = "~"
-home_color = "cyan"
+read_only = " 󰌾"
+read_only_style = "bold red"
+disabled = false
 
 [character]
-success_symbol = "➜"
-success_color = "bold green"
-error_symbol = "X"
-error_color = "bold red"
+format = "$symbol "
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+disabled = false

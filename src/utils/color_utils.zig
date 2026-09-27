@@ -66,6 +66,8 @@ pub const Color = enum {
     }
 };
 
+const style_mod = @import("../engine/style.zig");
+
 pub fn parseColor(raw_name: []const u8, fallback: []const u8) []const u8 {
     const trimmed = std.mem.trim(u8, raw_name, " \t");
 
@@ -84,6 +86,21 @@ pub fn parseColor(raw_name: []const u8, fallback: []const u8) []const u8 {
     return fallback;
 }
 
+/// Used only for tasting.
+pub fn parseColorAlloc(allocator: std.mem.Allocator, raw_name: []const u8, fallback: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, raw_name, " \t");
+    if (trimmed.len == 0) return fallback;
+
+    const static_val = parseColor(trimmed, "");
+    if (static_val.len > 0) return static_val;
+
+    const rendered = style_mod.renderStyle(allocator, trimmed) catch return fallback;
+    if (rendered.len == 0 and !std.ascii.eqlIgnoreCase(trimmed, "none") and trimmed.len > 0) {
+        return fallback;
+    }
+    return rendered;
+}
+
 test "parse standard and bold colors correctly" {
     try std.testing.expectEqualStrings("\x1b[32m", parseColor("green", ""));
     try std.testing.expectEqualStrings("\x1b[31m", parseColor("red", ""));
@@ -96,4 +113,16 @@ test "parse standard and bold colors correctly" {
     try std.testing.expectEqualStrings("\x1b[1;90m", parseColor("bold gray", ""));
 
     try std.testing.expectEqualStrings("default", parseColor("unknown", "default"));
+}
+
+test "parseColorAlloc handles style strings" {
+    const a = std.testing.allocator;
+
+    const res_hex = parseColorAlloc(a, "#bf5700", "");
+    defer a.free(res_hex);
+    try std.testing.expectEqualStrings("\x1b[38;2;191;87;0m", res_hex);
+
+    const res_complex = parseColorAlloc(a, "underline bg:#bf5700 fg:white", "");
+    defer a.free(res_complex);
+    try std.testing.expectEqualStrings("\x1b[4;37;48;2;191;87;0m", res_complex);
 }

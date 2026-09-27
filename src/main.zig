@@ -1,52 +1,51 @@
 const std = @import("std");
-const Config = @import("config.zig").Config;
-const path_utils = @import("path_utils.zig");
-const prompt_char = @import("prompt_char.zig");
-const toml_parser = @import("toml_parser.zig");
+
+pub const config_mod = @import("config/config.zig");
+pub const toml_parser = @import("config/toml_parser.zig");
+pub const style = @import("engine/style.zig");
+pub const formatter = @import("engine/formatter.zig");
+pub const prompt = @import("engine/prompt.zig");
+pub const directory = @import("modules/directory.zig");
+pub const character = @import("modules/character.zig");
+pub const buffer_writer = @import("utils/buffer_writer.zig");
+pub const path_utils = @import("utils/path_utils.zig");
+pub const color_utils = @import("utils/color_utils.zig");
+
+const Config = config_mod.Config;
+const BufferWriter = buffer_writer.BufferWriter;
 
 pub fn main(init: std.process.Init) !void {
-    // Initialize the standard library's allocator and set up an arena for memory management.
-    const allocator = init.arena.allocator();
     var config = Config{};
-    toml_parser.loadConfigFile(init.io, allocator, init.environ_map, &config);
+    var config_file_buf: [64 * 1024]u8 = undefined;
+    toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
 
-    const status_code = try parseStatusCode(init, allocator);
+    const status_code = try parseStatusCode(init, init.arena.allocator());
 
     const home_path = resolveHomePath(init);
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd_path = resolveCwdPath(init, &cwd_buf);
 
-    const formatted_path = try path_utils.formatPath(allocator, cwd_path, home_path, config.path);
-    const prompt_result = prompt_char.renderPromptChar(status_code, config.prompt);
+    var prompt_buf: [4096]u8 = undefined;
+    var pos: usize = 0;
 
-    const prefix = if (config.add_newline) "\n" else "";
-    const reset = "\x1b[0m";
+    const writer = BufferWriter.init(&prompt_buf, &pos);
 
-    // Format the prompt string with the appropriate colors and symbols.
-    // {s} -> formatted_path (path)
-    // {s} -> config.prompt.color (color for the prompt symbol)
-    // {s} -> config.prompt.symbol (prompt symbol)
-    // {s} -> reset (reset color code)
-    const prompt = try std.fmt.allocPrint(
-        allocator,
-        "{s}{s} {s}{s}{s} ",
-        .{
-            prefix,
-            formatted_path,
-            prompt_result.color,
-            prompt_result.symbol,
-            reset,
-        },
-    );
+    // Render all prompt modules via the prompt orchestrator
+    try prompt.render(writer, config, .{
+        .cwd = cwd_path,
+        .home = home_path,
+        .status_code = status_code,
+    });
 
-    try std.Io.File.stdout().writeStreamingAll(init.io, prompt);
+    // Output the rendered prompt buffer in a single syscall
+    try std.Io.File.stdout().writeStreamingAll(init.io, prompt_buf[0..pos]);
 }
 
 fn parseStatusCode(init: std.process.Init, allocator: std.mem.Allocator) !u8 {
     var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
 
-    _ = args.next(); // Skip file name
+    _ = args.next(); // Skip executable name
 
     if (args.next()) |status_raw| {
         return std.fmt.parseInt(u8, status_raw, 10) catch 0;

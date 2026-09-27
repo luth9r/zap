@@ -1,0 +1,47 @@
+const std = @import("std");
+const testing = std.testing;
+
+/// A lightweight, zero-heap-allocation streaming writer over a preallocated byte buffer.
+pub const BufferWriter = struct {
+    buf: []u8,
+    pos: *usize,
+
+    pub fn init(buf: []u8, pos: *usize) BufferWriter {
+        return .{ .buf = buf, .pos = pos };
+    }
+
+    pub fn writeByte(self: BufferWriter, byte: u8) !void {
+        if (self.pos.* < self.buf.len) {
+            self.buf[self.pos.*] = byte;
+            self.pos.* += 1;
+        }
+    }
+
+    pub fn writeAll(self: BufferWriter, bytes: []const u8) !void {
+        const avail = self.buf.len - self.pos.*;
+        const copy_len = @min(bytes.len, avail);
+        @memcpy(self.buf[self.pos.* .. self.pos.* + copy_len], bytes[0..copy_len]);
+        self.pos.* += copy_len;
+    }
+
+    pub fn written(self: BufferWriter) []const u8 {
+        return self.buf[0..self.pos.*];
+    }
+};
+
+test "BufferWriter writes bytes and slices up to capacity" {
+    var memory: [16]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&memory, &pos);
+
+    try writer.writeByte('H');
+    try writer.writeAll("ello, World!");
+
+    try testing.expectEqualStrings("Hello, World!", writer.written());
+    try testing.expectEqual(@as(usize, 13), pos);
+
+    // Overflow protection: writing past capacity truncates safely without crashing
+    try writer.writeAll("EXTRA BYTES THAT EXCEED");
+    try testing.expectEqual(@as(usize, 16), pos);
+    try testing.expectEqualStrings("Hello, World!EXT", memory[0..16]);
+}

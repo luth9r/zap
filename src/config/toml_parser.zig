@@ -1,0 +1,381 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const Config = @import("config.zig").Config;
+
+pub fn loadConfigFile(
+    io: std.Io,
+    environ_map: *const std.process.Environ.Map,
+    config: *Config,
+    content_buf: []u8,
+) void {
+    const EnvAdapter = struct {
+        var map_ptr: *const std.process.Environ.Map = undefined;
+        fn get(key: []const u8) ?[]const u8 {
+            return map_ptr.get(key);
+        }
+    };
+    EnvAdapter.map_ptr = environ_map;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const config_path = resolveConfigPathBuf(&path_buf, EnvAdapter.get) orelse return;
+
+    const file = std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return;
+    defer file.close(io);
+
+    var stream_buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &stream_buf);
+
+    const bytes_read = file_reader.interface.readSliceShort(content_buf) catch return;
+    if (bytes_read == 0) return;
+
+    parseToml(config, content_buf[0..bytes_read]);
+}
+
+const Section = enum {
+    directory,
+    character,
+};
+
+const DirKey = enum {
+    format,
+    style,
+    home_symbol,
+    read_only,
+    read_only_style,
+    disabled,
+};
+
+const CharKey = enum {
+    format,
+    success_symbol,
+    error_symbol,
+    disabled,
+};
+
+/// Parses TOML content directly into Config without heap allocations.
+pub fn parseToml(config: *Config, content: []const u8) void {
+    var line_it = std.mem.splitScalar(u8, content, '\n');
+    var current_section: ?[]const u8 = null;
+
+    while (line_it.next()) |raw_line| {
+        // Trim whitespace from the line to handle leading/trailing spaces and tabs
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+
+        // Skip empty lines and comments
+        if (line.len == 0 or line[0] == '#') {
+            continue;
+        }
+
+        // Section header [section]
+        if (line[0] == '[' and line[line.len - 1] == ']') {
+            current_section = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+            continue;
+        }
+
+        // Key-value
+        if (std.mem.indexOfScalar(u8, line, '=')) |equal_idx| {
+            var key = std.mem.trim(u8, line[0..equal_idx], " \t");
+            var val = std.mem.trim(u8, line[equal_idx + 1 ..], " \t");
+
+            if (key.len >= 2 and key[0] == '"' and key[key.len - 1] == '"') {
+                key = key[1 .. key.len - 1];
+            }
+
+            if (std.mem.eql(u8, key, "$schema"))
+                continue;
+
+            // Multiline string support (""" or ''')
+            if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
+                const quote_type = val[0..3];
+                var multiline_slice = val[3..];
+                if (multiline_slice.len >= 3 and std.mem.endsWith(u8, multiline_slice, quote_type)) {
+                    val = multiline_slice[0 .. multiline_slice.len - 3];
+                } else {
+                    const val_start_in_content = @intFromPtr(multiline_slice.ptr) - @intFromPtr(content.ptr);
+                    var end_pos: ?usize = null;
+                    while (line_it.next()) |next_raw| {
+                        if (std.mem.indexOf(u8, next_raw, quote_type)) |closing_idx| {
+                            const line_offset = @intFromPtr(next_raw.ptr) - @intFromPtr(content.ptr);
+                            end_pos = line_offset + closing_idx;
+                            break;
+                        }
+                    }
+                    if (end_pos) |ep| {
+                        if (ep >= val_start_in_content) {
+                            var multiline_raw = content[val_start_in_content..ep];
+                            if (multiline_raw.len > 0 and multiline_raw[0] == '\n') {
+                                multiline_raw = multiline_raw[1..];
+                            } else if (multiline_raw.len > 1 and multiline_raw[0] == '\r' and multiline_raw[1] == '\n') {
+                                multiline_raw = multiline_raw[2..];
+                            }
+                            val = multiline_raw;
+                        }
+                    }
+                }
+            } else if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
+                // If the value is quoted with double or single quotes, strip them
+                val = val[1 .. val.len - 1];
+            }
+
+            // Handle root keys (format, add_newline)
+            if (current_section == null) {
+                if (std.mem.eql(u8, key, "add_newline")) {
+                    if (std.mem.eql(u8, val, "true")) {
+                        config.add_newline = true;
+                    } else if (std.mem.eql(u8, val, "false")) {
+                        config.add_newline = false;
+                    }
+                    continue;
+                }
+                if (std.mem.eql(u8, key, "format")) {
+                    config.format = val;
+                    continue;
+                }
+            }
+
+            applyValue(config, current_section, key, val);
+        }
+    }
+}
+
+fn applyValue(config: *Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
+    const sec_str = section orelse return;
+    const sec = std.meta.stringToEnum(Section, sec_str) orelse return;
+
+    switch (sec) {
+        .directory => {
+            const dir_key = std.meta.stringToEnum(DirKey, key) orelse return;
+            switch (dir_key) {
+                .format => config.directory.format = val,
+                .style => config.directory.style = val,
+                .home_symbol => config.directory.home_symbol = val,
+                .read_only => config.directory.read_only = val,
+                .read_only_style => config.directory.read_only_style = val,
+                .disabled => {
+                    if (std.mem.eql(u8, val, "true")) {
+                        config.directory.disabled = true;
+                    } else if (std.mem.eql(u8, val, "false")) {
+                        config.directory.disabled = false;
+                    }
+                },
+            }
+        },
+        .character => {
+            const char_key = std.meta.stringToEnum(CharKey, key) orelse return;
+            switch (char_key) {
+                .format => config.character.format = val,
+                .success_symbol => config.character.success_symbol = val,
+                .error_symbol => config.character.error_symbol = val,
+                .disabled => {
+                    if (std.mem.eql(u8, val, "true")) {
+                        config.character.disabled = true;
+                    } else if (std.mem.eql(u8, val, "false")) {
+                        config.character.disabled = false;
+                    }
+                },
+            }
+        },
+    }
+}
+
+pub fn resolveConfigPathBuf(
+    buf: *[std.fs.max_path_bytes]u8,
+    lookup_env: *const fn ([]const u8) ?[]const u8,
+) ?[]const u8 {
+    // User-defined configuration path via environment variable
+    if (lookup_env("ZAP_CONFIG")) |custom| {
+        return custom;
+    }
+
+    // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/config.toml)
+    if (lookup_env("XDG_CONFIG_HOME")) |xdg| {
+        return std.fmt.bufPrint(buf, "{s}/zap/config.toml", .{xdg}) catch null;
+    }
+
+    // Windows-specific configuration path support (%APPDATA%\zap\config.toml)
+    if (builtin.os.tag == .windows) {
+        if (lookup_env("APPDATA")) |appdata| {
+            return std.fmt.bufPrint(buf, "{s}\\zap\\config.toml", .{appdata}) catch null;
+        }
+    }
+
+    // Universal fallback (~/.config/zap/config.toml)
+    const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+    if (lookup_env(home_env)) |home| {
+        const sep = if (builtin.os.tag == .windows) "\\" else "/";
+        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}config.toml", .{ home, sep, sep, sep }) catch null;
+    }
+
+    return null;
+}
+
+test "parse empty string preserves default config" {
+    var cfg = Config{};
+    parseToml(&cfg, "");
+
+    try std.testing.expectEqualStrings("~", cfg.directory.home_symbol);
+    try std.testing.expectEqualStrings("[❯](bold green)", cfg.character.success_symbol);
+    try std.testing.expectEqual(true, cfg.add_newline);
+}
+
+test "parse comments and sections" {
+    const toml_text =
+        \\# Configuration
+        \\
+        \\[directory]
+        \\home_symbol = "<>"
+        \\style = "bold yellow"
+        \\
+        \\[character]
+        \\success_symbol = "[➜](bold green)"
+        \\error_symbol = "[X](bold red)"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqualStrings("<>", cfg.directory.home_symbol);
+    try std.testing.expectEqualStrings("bold yellow", cfg.directory.style);
+    try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
+    try std.testing.expectEqualStrings("[X](bold red)", cfg.character.error_symbol);
+}
+
+test "resolveConfigPathBuf respects ZAP_CONFIG priority" {
+    const mockEnv = struct {
+        fn get(key: []const u8) ?[]const u8 {
+            if (std.mem.eql(u8, key, "ZAP_CONFIG")) return "/custom/zap.toml";
+            if (std.mem.eql(u8, key, "XDG_CONFIG_HOME")) return "/xdg";
+            return null;
+        }
+    }.get;
+
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = resolveConfigPathBuf(&buf, mockEnv).?;
+    try std.testing.expectEqualStrings("/custom/zap.toml", path);
+}
+
+test "resolveConfigPathBuf resolves XDG_CONFIG_HOME" {
+    const mockEnv = struct {
+        fn get(key: []const u8) ?[]const u8 {
+            if (std.mem.eql(u8, key, "XDG_CONFIG_HOME")) return "/home/test/.custom_config";
+            return null;
+        }
+    }.get;
+
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = resolveConfigPathBuf(&buf, mockEnv).?;
+    try std.testing.expectEqualStrings("/home/test/.custom_config/zap/config.toml", path);
+}
+
+test "resolveConfigPathBuf falls back to HOME/.config/zap/config.toml" {
+    const mockEnv = struct {
+        fn get(key: []const u8) ?[]const u8 {
+            if (std.mem.eql(u8, key, "HOME")) return "/home/user";
+            return null;
+        }
+    }.get;
+
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = resolveConfigPathBuf(&buf, mockEnv).?;
+    try std.testing.expectEqualStrings("/home/user/.config/zap/config.toml", path);
+}
+
+test "integration: parseToml correctly updates full configuration" {
+    const sample_config =
+        \\# Example configuration for zap
+        \\add_newline = false
+        \\format = "$directory$character"
+        \\
+        \\[directory]
+        \\home_symbol = "★"
+        \\style = "underline bg:#bf5700"
+        \\read_only = "󰌾"
+        \\read_only_style = "bold red"
+        \\
+        \\[character]
+        \\success_symbol = "[➜](bold green)"
+        \\error_symbol = "[✗](bold fg:27 bg:blue)"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, sample_config);
+
+    try std.testing.expectEqual(false, cfg.add_newline);
+    try std.testing.expectEqualStrings("$directory$character", cfg.format);
+    try std.testing.expectEqualStrings("★", cfg.directory.home_symbol);
+    try std.testing.expectEqualStrings("underline bg:#bf5700", cfg.directory.style);
+    try std.testing.expectEqualStrings("󰌾", cfg.directory.read_only);
+    try std.testing.expectEqualStrings("bold red", cfg.directory.read_only_style);
+    try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
+    try std.testing.expectEqualStrings("[✗](bold fg:27 bg:blue)", cfg.character.error_symbol);
+}
+
+test "parseToml ignores $schema root key" {
+    const toml_with_schema =
+        \\"$schema" = "https://raw.githubusercontent.com/username/zap/main/zap.schema.json"
+        \\
+        \\[character]
+        \\success_symbol = "[»](bold cyan)"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_with_schema);
+
+    try std.testing.expectEqualStrings("[»](bold cyan)", cfg.character.success_symbol);
+}
+
+test "parseToml with disabled modules" {
+    const disabled_config =
+        \\[directory]
+        \\disabled = true
+        \\
+        \\[character]
+        \\disabled = false
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, disabled_config);
+
+    try std.testing.expectEqual(true, cfg.directory.disabled);
+    try std.testing.expectEqual(false, cfg.character.disabled);
+}
+
+test "parseToml with custom format strings" {
+    const format_config =
+        \\format = "in $directory\n$character"
+        \\
+        \\[directory]
+        \\format = "[$path]($style) "
+        \\style = "bold cyan"
+        \\
+        \\[character]
+        \\format = "$symbol "
+        \\success_symbol = "[➜](bold green)"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, format_config);
+
+    try std.testing.expectEqualStrings("in $directory\\n$character", cfg.format);
+    try std.testing.expectEqualStrings("[$path]($style) ", cfg.directory.format);
+    try std.testing.expectEqualStrings("bold cyan", cfg.directory.style);
+    try std.testing.expectEqualStrings("$symbol ", cfg.character.format);
+    try std.testing.expectEqualStrings("[➜](bold green)", cfg.character.success_symbol);
+}
+
+test "parseToml with multiline format string" {
+    const multiline_config =
+        \\format = """
+        \\┌─ $directory
+        \\└─ $character"""
+        \\
+        \\[directory]
+        \\style = "bold cyan"
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, multiline_config);
+
+    const expected_format = "┌─ $directory\n└─ $character";
+    try std.testing.expectEqualStrings(expected_format, cfg.format);
+}

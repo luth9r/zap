@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ZapConfig",
-  "description": "Configuration schema for zap minimal prompt",
+  "description": "Configuration schema for zap minimal prompt with full styling support",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -9,26 +9,50 @@
       "type": "string",
       "description": "Path or URL to JSON schema for validation and autocompletion"
     },
+    "format": {
+      "type": "string",
+      "default": "$directory$character",
+      "description": "Root prompt format string controlling module layout and inline styling blocks [content](style)"
+    },
     "add_newline": {
       "type": "boolean",
-      "default": false,
+      "default": true,
       "description": "Insert a blank line before the prompt"
     },
     "directory": {
       "type": "object",
-      "description": "Path and directory rendering configuration",
+      "description": "Directory path rendering configuration",
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "type": "string",
+          "default": "[$path]($style)[$read_only]($read_only_style) ",
+          "description": "Format template for the directory module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold cyan",
+          "description": "Style string for the directory path"
+        },
         "home_symbol": {
           "type": "string",
           "default": "~",
           "description": "Replacement symbol for the user home directory"
         },
-        "home_color": {
+        "read_only": {
           "type": "string",
-          "$ref": "#/definitions/Color",
-          "default": "cyan",
-          "description": "Color used for the directory path"
+          "default": "󰌾",
+          "description": "Symbol shown when the current directory is read-only (Nerd Font icon)"
+        },
+        "read_only_style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold red",
+          "description": "Style string for the read-only symbol"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the directory module"
         }
       }
     },
@@ -37,33 +61,71 @@
       "description": "Prompt indicator character configuration",
       "additionalProperties": false,
       "properties": {
+        "format": {
+          "type": "string",
+          "default": "$symbol ",
+          "description": "Format template for the character module"
+        },
         "success_symbol": {
           "type": "string",
-          "default": ">",
-          "description": "Symbol rendered when the exit code is 0"
-        },
-        "success_color": {
-          "type": "string",
-          "$ref": "#/definitions/Color",
-          "default": "bold green",
-          "description": "Color of the symbol on success"
+          "default": "[❯](bold green)",
+          "description": "Symbol rendered when the exit code is 0 (supports [symbol](style))"
         },
         "error_symbol": {
           "type": "string",
-          "default": ">",
-          "description": "Symbol rendered on non-zero exit code"
+          "default": "[❯](bold red)",
+          "description": "Symbol rendered on non-zero exit code (supports [symbol](style))"
         },
-        "error_color": {
-          "type": "string",
-          "$ref": "#/definitions/Color",
-          "default": "bold red",
-          "description": "Color of the symbol on error"
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the character module"
         }
       }
     }
   },
   "definitions": {
-    "Color": {
+    "Style": {
+      "type": "string",
+      "description": "Style string combining modifiers, foreground/background colors, 8-bit ANSI (0-255), and 24-bit TrueColor Hex (#RGB / #RRGGBB). Examples: 'bold cyan', 'bold italic fg:#50fa7b bg:#282a36', 'underline bg:#bf5700 fg:white', '240', 'bold fg:27'.",
+      "examples": [
+        "bold cyan",
+        "bold green",
+        "bold red",
+        "bold yellow",
+        "bold purple",
+        "bold magenta",
+        "bold blue",
+        "bold white",
+        "bold gray",
+        "italic fg:#8be9fd",
+        "underline bg:#bf5700 fg:white",
+        "bold italic fg:#50fa7b bg:#282a36",
+        "240",
+        "fg:27",
+        "bg:200",
+        "none"
+      ]
+    },
+    "Modifier": {
+      "type": "string",
+      "enum": [
+        "bold",
+        "dimmed",
+        "dim",
+        "italic",
+        "underline",
+        "underlined",
+        "blink",
+        "inverted",
+        "invert",
+        "hidden",
+        "strikethrough",
+        "reset",
+        "none"
+      ]
+    },
+    "NamedColor": {
       "type": "string",
       "enum": [
         "black",
@@ -72,24 +134,20 @@
         "yellow",
         "blue",
         "magenta",
+        "purple",
         "cyan",
         "white",
-        "bright black",
-        "bright red",
-        "bright green",
-        "bright yellow",
-        "bright blue",
-        "bright magenta",
-        "bright cyan",
-        "bright white",
-        "bold black",
-        "bold red",
-        "bold green",
-        "bold yellow",
-        "bold blue",
-        "bold magenta",
-        "bold cyan",
-        "bold white"
+        "bright-black",
+        "gray",
+        "grey",
+        "bright-red",
+        "bright-green",
+        "bright-yellow",
+        "bright-blue",
+        "bright-magenta",
+        "bright-purple",
+        "bright-cyan",
+        "bright-white"
       ]
     }
   }
