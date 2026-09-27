@@ -58,6 +58,7 @@ pub fn render(
         .vars = &[_]formatter.Variable{
             .{ .name = "symbol", .value = config.git_branch.symbol },
             .{ .name = "branch", .value = branch_str },
+            .{ .name = "remote_branch", .value = "" },
         },
     });
 }
@@ -73,6 +74,33 @@ test "truncateBranch below and above max_len" {
 
     // Above limit
     try std.testing.expectEqualStrings("feat…", truncateBranch(&buf, "feature/auth", 4, "…"));
+}
+
+test "render git_branch with powerline styled block and conditional remote" {
+    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+
+    var cfg = Config{};
+    cfg.git_branch.format = "  [](bold purple)[$symbol $branch(:$remote_branch)](fg:black bg:purple)[](bold purple) ";
+    cfg.git_branch.symbol = "";
+    cfg.git_branch.truncation_length = 15;
+    cfg.git_branch.truncation_symbol = "";
+
+    var buf: [512]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+
+    // Mock direct formatter with vars
+    try formatter.formatTemplateWriter(writer, cfg.git_branch.format, .{
+        .style = cfg.git_branch.style,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "symbol", .value = cfg.git_branch.symbol },
+            .{ .name = "branch", .value = "main" },
+            .{ .name = "remote_branch", .value = "" },
+        },
+    });
+
+    const expected = "  \x1b[1;35m\x1b[0m\x1b[30;45m main\x1b[0m\x1b[1;35m\x1b[0m ";
+    try std.testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
 test "render git_branch disabled" {
