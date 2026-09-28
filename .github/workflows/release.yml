@@ -46,9 +46,11 @@ jobs:
 
       - name: Setup Zig
         run: |
-          ZIG_URL=$(curl -sSL https://ziglang.org/download/index.json | jq -r '.master."x86_64-linux".tarball')
+          ZIG_URL=$(curl -sSL https://ziglang.org/download/index.json | jq -r 'to_entries | map(select(.key != "master")) | .[0].value."x86_64-linux".tarball')
+          echo "Fetching Zig from: $ZIG_URL"
           mkdir -p /tmp/zig-install
-          curl -sSL "$ZIG_URL" | tar -xJ -C /tmp/zig-install --strip-components=1
+          curl -sSL "$ZIG_URL" -o /tmp/zig.tar.xz
+          tar -xf /tmp/zig.tar.xz -C /tmp/zig-install --strip-components=1
           echo "/tmp/zig-install" >> $GITHUB_PATH
           /tmp/zig-install/zig version
 
