@@ -7,12 +7,16 @@ pub const Variable = struct {
     value: []const u8,
 };
 
+pub const Shell = @import("../init/root.zig").Shell;
+
 /// Holds variable bindings and styling options for template expansion.
 pub const FormatContext = struct {
     /// Array of key-value pairs available for expansion (e.g. `$path`, `$symbol`).
     vars: []const Variable = &.{},
     /// Default style used when `$style` is referenced within a format group.
     style: []const u8 = "",
+    /// Shell target for zero-width escape wrapping.
+    shell: Shell = .generic,
 
     /// Looks up a variable by its name. Checks `$style` first, then searches `vars`.
     pub fn get(self: FormatContext, name: []const u8) ?[]const u8 {
@@ -212,12 +216,30 @@ fn renderStyledGroup(
         style_mod.renderStyleBuf(&style_buf, resolved_style) orelse "";
 
     if (style_ansi.len > 0)
-        try writer.writeAll(style_ansi);
+        try writeZeroWidthAnsi(writer, style_ansi, ctx.shell);
 
     try renderGroupContent(writer, content_raw, ctx);
 
     if (style_ansi.len > 0)
-        try writer.writeAll("\x1b[0m");
+        try writeZeroWidthAnsi(writer, "\x1b[0m", ctx.shell);
+}
+
+pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !void {
+    switch (shell) {
+        .bash => {
+            try writer.writeByte('\x01');
+            try writer.writeAll(ansi_seq);
+            try writer.writeByte('\x02');
+        },
+        .zsh => {
+            try writer.writeAll("%{");
+            try writer.writeAll(ansi_seq);
+            try writer.writeAll("%}");
+        },
+        .fish, .powershell, .generic => {
+            try writer.writeAll(ansi_seq);
+        },
+    }
 }
 
 fn isGroupContentEmpty(raw: []const u8, ctx: FormatContext) bool {
@@ -548,3 +570,31 @@ test "unmatched brackets handled as literal text" {
 
     try testing.expectEqualStrings("normal [text without style) and (parentheses)", res);
 }
+
+test "shell zero-width escape wrapping" {
+    const a = testing.allocator;
+    const ctx_bash = FormatContext{
+        .shell = .bash,
+        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+    };
+    const res_bash = try formatTemplate(a, "[$text](bold green)", ctx_bash);
+    defer a.free(res_bash);
+    try testing.expectEqualStrings("\x01\x1b[1;32m\x02hi\x01\x1b[0m\x02", res_bash);
+
+    const ctx_zsh = FormatContext{
+        .shell = .zsh,
+        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+    };
+    const res_zsh = try formatTemplate(a, "[$text](bold green)", ctx_zsh);
+    defer a.free(res_zsh);
+    try testing.expectEqualStrings("%{\x1b[1;32m%}hi%{\x1b[0m%}", res_zsh);
+
+    const ctx_fish = FormatContext{
+        .shell = .fish,
+        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+    };
+    const res_fish = try formatTemplate(a, "[$text](bold green)", ctx_fish);
+    defer a.free(res_fish);
+    try testing.expectEqualStrings("\x1b[1;32mhi\x1b[0m", res_fish);
+}
+

@@ -31,27 +31,67 @@ pub fn loadConfigFile(
     parseToml(config, content_buf[0..bytes_read]);
 }
 
+/// Parses a section header `[section]` if the line is a section declaration.
+fn parseSectionHeader(line: []const u8) ?[]const u8 {
+    if (line.len >= 2 and line[0] == '[' and line[line.len - 1] == ']') {
+        return std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+    }
+    return null;
+}
+
+/// Unquotes simple double- or single-quoted string values.
+fn unquoteValue(val: []const u8) []const u8 {
+    if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
+        return val[1 .. val.len - 1];
+    }
+    return val;
+}
+
+/// Extracts a multiline string enclosed in triple quotes (""" or ''').
+fn extractMultilineValue(val: []const u8, content: []const u8, line_it: *std.mem.SplitIterator(u8, .scalar)) []const u8 {
+    const quote_type = val[0..3];
+    var multiline_slice = val[3..];
+    if (multiline_slice.len >= 3 and std.mem.endsWith(u8, multiline_slice, quote_type)) {
+        return multiline_slice[0 .. multiline_slice.len - 3];
+    }
+
+    const val_start_in_content = @intFromPtr(multiline_slice.ptr) - @intFromPtr(content.ptr);
+    var end_pos: ?usize = null;
+    while (line_it.next()) |next_raw| {
+        if (std.mem.indexOf(u8, next_raw, quote_type)) |closing_idx| {
+            const line_offset = @intFromPtr(next_raw.ptr) - @intFromPtr(content.ptr);
+            end_pos = line_offset + closing_idx;
+            break;
+        }
+    }
+    if (end_pos) |ep| {
+        if (ep >= val_start_in_content) {
+            var multiline_raw = content[val_start_in_content..ep];
+            if (multiline_raw.len > 0 and multiline_raw[0] == '\n') {
+                multiline_raw = multiline_raw[1..];
+            } else if (multiline_raw.len > 1 and multiline_raw[0] == '\r' and multiline_raw[1] == '\n') {
+                multiline_raw = multiline_raw[2..];
+            }
+            return multiline_raw;
+        }
+    }
+    return val;
+}
+
 /// Parses TOML content directly into Config without heap allocations using comptime reflection.
 pub fn parseToml(config: *Config, content: []const u8) void {
     var line_it = std.mem.splitScalar(u8, content, '\n');
     var current_section: ?[]const u8 = null;
 
     while (line_it.next()) |raw_line| {
-        // Trim whitespace from the line to handle leading/trailing spaces and tabs
         const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
 
-        // Skip empty lines and comments
-        if (line.len == 0 or line[0] == '#') {
+        if (parseSectionHeader(line)) |sec| {
+            current_section = sec;
             continue;
         }
 
-        // Section header [section]
-        if (line[0] == '[' and line[line.len - 1] == ']') {
-            current_section = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
-            continue;
-        }
-
-        // Key-value
         if (std.mem.indexOfScalar(u8, line, '=')) |equal_idx| {
             var key = std.mem.trim(u8, line[0..equal_idx], " \t");
             var val = std.mem.trim(u8, line[equal_idx + 1 ..], " \t");
@@ -60,40 +100,12 @@ pub fn parseToml(config: *Config, content: []const u8) void {
                 key = key[1 .. key.len - 1];
             }
 
-            if (std.mem.eql(u8, key, "$schema"))
-                continue;
+            if (std.mem.eql(u8, key, "$schema")) continue;
 
-            // Multiline string support (""" or ''')
             if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
-                const quote_type = val[0..3];
-                var multiline_slice = val[3..];
-                if (multiline_slice.len >= 3 and std.mem.endsWith(u8, multiline_slice, quote_type)) {
-                    val = multiline_slice[0 .. multiline_slice.len - 3];
-                } else {
-                    const val_start_in_content = @intFromPtr(multiline_slice.ptr) - @intFromPtr(content.ptr);
-                    var end_pos: ?usize = null;
-                    while (line_it.next()) |next_raw| {
-                        if (std.mem.indexOf(u8, next_raw, quote_type)) |closing_idx| {
-                            const line_offset = @intFromPtr(next_raw.ptr) - @intFromPtr(content.ptr);
-                            end_pos = line_offset + closing_idx;
-                            break;
-                        }
-                    }
-                    if (end_pos) |ep| {
-                        if (ep >= val_start_in_content) {
-                            var multiline_raw = content[val_start_in_content..ep];
-                            if (multiline_raw.len > 0 and multiline_raw[0] == '\n') {
-                                multiline_raw = multiline_raw[1..];
-                            } else if (multiline_raw.len > 1 and multiline_raw[0] == '\r' and multiline_raw[1] == '\n') {
-                                multiline_raw = multiline_raw[2..];
-                            }
-                            val = multiline_raw;
-                        }
-                    }
-                }
-            } else if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
-                // If the value is quoted with double or single quotes, strip them
-                val = val[1 .. val.len - 1];
+                val = extractMultilineValue(val, content, &line_it);
+            } else {
+                val = unquoteValue(val);
             }
 
             applyValue(config, current_section, key, val);

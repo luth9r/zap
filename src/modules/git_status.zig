@@ -100,42 +100,45 @@ pub fn formatAheadBehind(
     return "";
 }
 
+pub const is_git_dependent: bool = true;
+
 /// Renders the git_status module according to configuration.
 pub fn render(
     writer: anytype,
-    config: Config,
+    config: GitStatusConfig,
     ctx: PromptContext,
 ) !void {
-    if (config.git_status.disabled) return;
+    if (config.disabled) return;
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
+    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
 
     var head_buf: [512]u8 = undefined;
-    const branch = git_utils.getGitBranch(io, ctx.cwd, &git_dir_buf, &head_buf);
+    const branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf);
     const info = git_utils.getGitStatus(io, git_dir, branch);
 
     // If nothing to report and no status symbols, return early
     if (!info.hasAnyStatus()) return;
 
     var all_status_buf: [128]u8 = undefined;
-    const all_status_str = formatAllStatus(&all_status_buf, config.git_status, info);
+    const all_status_str = formatAllStatus(&all_status_buf, config, info);
 
     var ahead_behind_buf: [64]u8 = undefined;
-    const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, config.git_status, info.ahead, info.behind);
+    const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, config, info.ahead, info.behind);
 
-    try formatter.formatTemplateWriter(writer, config.git_status.format, .{
-        .style = config.git_status.style,
+    try formatter.formatTemplateWriter(writer, config.format, .{
+        .style = config.style,
+        .shell = ctx.shell,
         .vars = &[_]formatter.Variable{
             .{ .name = "all_status", .value = all_status_str },
             .{ .name = "ahead_behind", .value = ahead_behind_str },
-            .{ .name = "stashed", .value = if (info.stashed) config.git_status.stashed else "" },
-            .{ .name = "modified", .value = if (info.modified) config.git_status.modified else "" },
-            .{ .name = "staged", .value = if (info.staged) config.git_status.staged else "" },
-            .{ .name = "untracked", .value = if (info.untracked) config.git_status.untracked else "" },
-            .{ .name = "renamed", .value = if (info.renamed) config.git_status.renamed else "" },
-            .{ .name = "deleted", .value = if (info.deleted) config.git_status.deleted else "" },
+            .{ .name = "stashed", .value = if (info.stashed) config.stashed else "" },
+            .{ .name = "modified", .value = if (info.modified) config.modified else "" },
+            .{ .name = "staged", .value = if (info.staged) config.staged else "" },
+            .{ .name = "untracked", .value = if (info.untracked) config.untracked else "" },
+            .{ .name = "renamed", .value = if (info.renamed) config.renamed else "" },
+            .{ .name = "deleted", .value = if (info.deleted) config.deleted else "" },
         },
     });
 }
@@ -221,8 +224,8 @@ test "render git_status full symbols combination" {
 }
 
 test "render git_status disabled" {
-    var cfg = Config{};
-    cfg.git_status.disabled = true;
+    var cfg = GitStatusConfig{};
+    cfg.disabled = true;
 
     var buf: [256]u8 = undefined;
     var pos: usize = 0;
@@ -234,19 +237,19 @@ test "render git_status disabled" {
 }
 
 test "integration: full git_status module rendering with custom symbols and all flags" {
-    var cfg = Config{};
-    cfg.git_status.format = "[[$all_status $ahead_behind]]($style) ";
-    cfg.git_status.style = "bold red";
-    cfg.git_status.conflicted = "=";
-    cfg.git_status.stashed = "$";
-    cfg.git_status.deleted = "✘";
-    cfg.git_status.renamed = "»";
-    cfg.git_status.modified = "!";
-    cfg.git_status.staged = "+";
-    cfg.git_status.untracked = "?";
-    cfg.git_status.diverged = "⇕";
-    cfg.git_status.ahead = "⇡";
-    cfg.git_status.behind = "⇣";
+    var cfg = GitStatusConfig{};
+    cfg.format = "[[$all_status $ahead_behind]]($style) ";
+    cfg.style = "bold red";
+    cfg.conflicted = "=";
+    cfg.stashed = "$";
+    cfg.deleted = "✘";
+    cfg.renamed = "»";
+    cfg.modified = "!";
+    cfg.staged = "+";
+    cfg.untracked = "?";
+    cfg.diverged = "⇕";
+    cfg.ahead = "⇡";
+    cfg.behind = "⇣";
 
     const info = git_utils.GitStatusInfo{
         .conflicted = true,
@@ -261,29 +264,29 @@ test "integration: full git_status module rendering with custom symbols and all 
     };
 
     var all_status_buf: [128]u8 = undefined;
-    const all_status_str = formatAllStatus(&all_status_buf, cfg.git_status, info);
+    const all_status_str = formatAllStatus(&all_status_buf, cfg, info);
     try std.testing.expectEqualStrings("=$✘»!+?", all_status_str);
 
     var ahead_behind_buf: [64]u8 = undefined;
-    const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, cfg.git_status, info.ahead, info.behind);
+    const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, cfg, info.ahead, info.behind);
     try std.testing.expectEqualStrings("⇕4 2", ahead_behind_str);
 
     var buf: [512]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
 
-    try formatter.formatTemplateWriter(writer, cfg.git_status.format, .{
-        .style = cfg.git_status.style,
+    try formatter.formatTemplateWriter(writer, cfg.format, .{
+        .style = cfg.style,
         .vars = &[_]formatter.Variable{
             .{ .name = "all_status", .value = all_status_str },
             .{ .name = "ahead_behind", .value = ahead_behind_str },
-            .{ .name = "stashed", .value = if (info.stashed) cfg.git_status.stashed else "" },
-            .{ .name = "modified", .value = if (info.modified) cfg.git_status.modified else "" },
-            .{ .name = "staged", .value = if (info.staged) cfg.git_status.staged else "" },
-            .{ .name = "untracked", .value = if (info.untracked) cfg.git_status.untracked else "" },
-            .{ .name = "renamed", .value = if (info.renamed) cfg.git_status.renamed else "" },
-            .{ .name = "deleted", .value = if (info.deleted) cfg.git_status.deleted else "" },
-            .{ .name = "conflicted", .value = if (info.conflicted) cfg.git_status.conflicted else "" },
+            .{ .name = "stashed", .value = if (info.stashed) cfg.stashed else "" },
+            .{ .name = "modified", .value = if (info.modified) cfg.modified else "" },
+            .{ .name = "staged", .value = if (info.staged) cfg.staged else "" },
+            .{ .name = "untracked", .value = if (info.untracked) cfg.untracked else "" },
+            .{ .name = "renamed", .value = if (info.renamed) cfg.renamed else "" },
+            .{ .name = "deleted", .value = if (info.deleted) cfg.deleted else "" },
+            .{ .name = "conflicted", .value = if (info.conflicted) cfg.conflicted else "" },
         },
     });
 
@@ -292,8 +295,8 @@ test "integration: full git_status module rendering with custom symbols and all 
 }
 
 test "integration: individual status variables in custom template" {
-    var cfg = Config{};
-    cfg.git_status.format = "(C:$conflicted )(S:$stashed )(M:$modified )(A:$staged )(U:$untracked )(R:$renamed )(D:$deleted )";
+    var cfg = GitStatusConfig{};
+    cfg.format = "(C:$conflicted )(S:$stashed )(M:$modified )(A:$staged )(U:$untracked )(R:$renamed )(D:$deleted )";
 
     var buf: [512]u8 = undefined;
     var pos: usize = 0;
@@ -309,7 +312,7 @@ test "integration: individual status variables in custom template" {
         .deleted = true,
     };
 
-    try formatter.formatTemplateWriter(writer, cfg.git_status.format, .{
+    try formatter.formatTemplateWriter(writer, cfg.format, .{
         .vars = &[_]formatter.Variable{
             .{ .name = "conflicted", .value = if (info.conflicted) "=" else "" },
             .{ .name = "stashed", .value = if (info.stashed) "$" else "" },
@@ -324,3 +327,52 @@ test "integration: individual status variables in custom template" {
     const expected = "C:= M:! A:+ U:? R:» D:✘ ";
     try std.testing.expectEqualStrings(expected, buf[0..pos]);
 }
+
+test "render git_status across all shells" {
+    const Shell = @import("../init/root.zig").Shell;
+    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+
+    const cfg = GitStatusConfig{};
+    var buf: [512]u8 = undefined;
+    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+
+    for (shells) |sh| {
+        var pos: usize = 0;
+        const writer = BufferWriter.init(&buf, &pos);
+        try formatter.formatTemplateWriter(writer, cfg.format, .{
+            .style = cfg.style,
+            .shell = sh,
+            .vars = &[_]formatter.Variable{
+                .{ .name = "all_status", .value = "!?" },
+                .{ .name = "ahead_behind", .value = "" },
+            },
+        });
+        const out = buf[0..pos];
+        try assertValidShellAnsi(out, sh);
+    }
+
+    // Exact string verification for Bash
+    var pos_bash: usize = 0;
+    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_bash), cfg.format, .{
+        .style = cfg.style,
+        .shell = .bash,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "all_status", .value = "!?" },
+            .{ .name = "ahead_behind", .value = "" },
+        },
+    });
+    try std.testing.expectEqualStrings("\x01\x1b[1;31m\x02[!?]\x01\x1b[0m\x02 ", buf[0..pos_bash]);
+
+    // Exact string verification for Zsh
+    var pos_zsh: usize = 0;
+    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_zsh), cfg.format, .{
+        .style = cfg.style,
+        .shell = .zsh,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "all_status", .value = "!?" },
+            .{ .name = "ahead_behind", .value = "" },
+        },
+    });
+    try std.testing.expectEqualStrings("%{\x1b[1;31m%}[!?]%{\x1b[0m%} ", buf[0..pos_zsh]);
+}
+

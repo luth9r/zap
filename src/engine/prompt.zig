@@ -6,8 +6,30 @@ const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 pub const PromptContext = @import("context.zig").PromptContext;
 pub const modules = @import("../modules/registry.zig");
 
-fn isModuleRequested(format: []const u8, comptime name: []const u8) bool {
-    return std.mem.indexOf(u8, format, "$" ++ name) != null;
+/// Computes a bitmask of active modules in a single pass over the format string.
+pub fn computeActiveModulesMask(format: []const u8) u16 {
+    const decls = @typeInfo(modules).@"struct".decls;
+    var mask: u16 = 0;
+    var i: usize = 0;
+    while (i < format.len) {
+        if (format[i] == '\\' and i + 1 < format.len) {
+            i += 2;
+            continue;
+        }
+        if (format[i] == '$') {
+            const rest = format[i + 1 ..];
+            inline for (decls, 0..) |decl, idx| {
+                if (std.mem.startsWith(u8, rest, decl.name)) {
+                    const end = decl.name.len;
+                    if (rest.len == end or (!std.ascii.isAlphanumeric(rest[end]) and rest[end] != '_')) {
+                        mask |= @as(u16, 1) << @as(u4, @intCast(idx));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return mask;
 }
 
 /// Orchestrates rendering the complete prompt across all active modules using comptime reflection.
@@ -16,8 +38,32 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
         try writer.writeByte('\n');
     }
 
+    const active_mask = computeActiveModulesMask(config.format);
     const decls = @typeInfo(modules).@"struct".decls;
     var vars: [decls.len]formatter.Variable = undefined;
+
+    // Fast Git repo resolution: if any git-dependent module is active and git_dir is not yet supplied,
+    // discover it once on the stack frame and pass it down.
+    const git_modules_mask = comptime blk: {
+        const d = @typeInfo(modules).@"struct".decls;
+        var m: u16 = 0;
+        for (d, 0..) |decl, idx| {
+            const m_mod = @field(modules, decl.name);
+            if (@hasDecl(m_mod, "is_git_dependent") and m_mod.is_git_dependent) {
+                m |= @as(u16, 1) << @as(u4, @intCast(idx));
+            }
+        }
+        break :blk m;
+    };
+    const dir_needs_git = config.directory.truncate_to_repo and (active_mask & computeActiveModulesMask("$directory")) != 0;
+    const should_check_git = ((active_mask & git_modules_mask) != 0 or dir_needs_git) and ctx.git_dir == null and ctx.io != null;
+
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var resolved_ctx = ctx;
+    if (should_check_git) {
+        const git_utils = @import("../utils/git_utils.zig");
+        resolved_ctx.git_dir = git_utils.findGitDir(resolved_ctx.io.?, resolved_ctx.cwd, &git_dir_buf);
+    }
 
     inline for (decls, 0..) |decl, i| {
         const mod = @field(modules, decl.name);
@@ -25,9 +71,15 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
         var buf: [buf_size]u8 = undefined;
         var pos: usize = 0;
 
-        if (isModuleRequested(config.format, decl.name)) {
-            const mod_writer = BufferWriter.init(&buf, &pos);
-            try mod.render(mod_writer, config, ctx);
+        const is_active = (active_mask & (@as(u16, 1) << @as(u4, @intCast(i)))) != 0;
+        if (is_active) {
+            // Fast exit: if this is a purely git-based module and we know we're not in a git repo, skip it
+            const is_git_mod = (git_modules_mask & (@as(u16, 1) << @as(u4, @intCast(i)))) != 0;
+            if (!is_git_mod or resolved_ctx.git_dir != null) {
+                const mod_writer = BufferWriter.init(&buf, &pos);
+                const mod_cfg = @field(config, decl.name);
+                try mod.render(mod_writer, mod_cfg, resolved_ctx);
+            }
         }
 
         vars[i] = .{
@@ -38,6 +90,7 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
 
     try formatter.formatTemplateWriter(writer, config.format, .{
         .vars = &vars,
+        .shell = ctx.shell,
     });
 }
 
@@ -218,5 +271,17 @@ test "render prompt with all git modules in root format" {
 
     const expected = "\x1b[1;36m~/zap\x1b[0m on \x1b[1;35mmain\x1b[0m \x1b[1;32m(4cd65cc)\x1b[0m (\x1b[1;33mREBASING 1/3\x1b[0m) \x1b[1;31m[!+]\x1b[0m \x1b[1;32m❯\x1b[0m ";
     try testing.expectEqualStrings(expected, buf[0..pos]);
+}
+
+test "computeActiveModulesMask bitmask calculation" {
+    // 0: directory, 1: git_branch, 2: git_commit, 3: git_state, 4: git_status, 5: cmd_duration, 6: character
+    const mask1 = computeActiveModulesMask("$directory$character");
+    try testing.expectEqual(@as(u16, (1 << 0) | (1 << 6)), mask1);
+
+    const mask2 = computeActiveModulesMask("[$directory](cyan) \\$escaped [$cmd_duration](yellow) $character");
+    try testing.expectEqual(@as(u16, (1 << 0) | (1 << 5) | (1 << 6)), mask2);
+
+    const mask_none = computeActiveModulesMask("plain text without modules");
+    try testing.expectEqual(@as(u16, 0), mask_none);
 }
 

@@ -21,6 +21,7 @@ pub const isIgnored = git.isIgnored;
 
 pub const parseHeadContent = git.parseHeadContent;
 pub const getGitBranch = git.getGitBranch;
+pub const getGitBranchFromDir = git.getGitBranchFromDir;
 pub const getGitCommit = git.getGitCommit;
 pub const readRefSha = git.readRefSha;
 pub const getAheadBehind = git.getAheadBehind;

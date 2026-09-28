@@ -16,62 +16,125 @@ pub const registry = @import("modules/registry.zig");
 pub const context = @import("engine/context.zig");
 pub const buffer_writer = @import("utils/buffer_writer.zig");
 pub const path_utils = @import("utils/path_utils.zig");
-pub const color_utils = @import("utils/color_utils.zig");
 pub const git_utils = @import("utils/git_utils.zig");
+pub const init_mod = @import("init/root.zig");
+pub const shell_integration_test = @import("tests/shell_integration_test.zig");
 
 const Config = config_mod.Config;
 const BufferWriter = buffer_writer.BufferWriter;
 
-pub fn main(init: std.process.Init) !void {
-    var config = Config{};
-    var config_file_buf: [64 * 1024]u8 = undefined;
-    toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
-
-    const exec_args = try parseExecutionArgs(init, init.arena.allocator());
-
-    const home_path = resolveHomePath(init);
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_path = resolveCwdPath(init, &cwd_buf);
-
-    var prompt_buf: [4096]u8 = undefined;
-    var pos: usize = 0;
-
-    const writer = BufferWriter.init(&prompt_buf, &pos);
-
-    // Render all prompt modules via the prompt orchestrator
-    try prompt.render(writer, config, .{
-        .cwd = cwd_path,
-        .home = home_path,
-        .status_code = exec_args.status_code,
-        .cmd_duration = exec_args.cmd_duration,
-        .io = init.io,
-    });
-
-    // Output the rendered prompt buffer in a single syscall
-    try std.Io.File.stdout().writeStreamingAll(init.io, prompt_buf[0..pos]);
-}
-
-const ExecutionArgs = struct {
-    status_code: u8 = 0,
-    cmd_duration: u64 = 0,
+pub const Command = union(enum) {
+    init: struct {
+        shell: init_mod.Shell,
+        exe_name: []const u8 = "zap",
+    },
+    prompt: struct {
+        status_code: u8 = 0,
+        cmd_duration: u64 = 0,
+        shell: init_mod.Shell = .generic,
+    },
 };
 
-fn parseExecutionArgs(init: std.process.Init, allocator: std.mem.Allocator) !ExecutionArgs {
-    var res = ExecutionArgs{};
+pub fn main(init: std.process.Init) !void {
+    const cmd = try parseCommand(init, init.arena.allocator());
 
+    switch (cmd) {
+        .init => |init_args| {
+            var script_buf: [8192]u8 = undefined;
+            var pos: usize = 0;
+            const writer = BufferWriter.init(&script_buf, &pos);
+            try init_mod.renderInitScript(writer, init_args.shell, init_args.exe_name);
+            try std.Io.File.stdout().writeStreamingAll(init.io, script_buf[0..pos]);
+        },
+        .prompt => |prompt_args| {
+            var config = Config{};
+            var config_file_buf: [64 * 1024]u8 = undefined;
+            toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
+
+            const home_path = resolveHomePath(init);
+            var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const cwd_path = resolveCwdPath(init, &cwd_buf);
+
+            var prompt_buf: [4096]u8 = undefined;
+            var pos: usize = 0;
+            const writer = BufferWriter.init(&prompt_buf, &pos);
+
+            // Render all prompt modules via the prompt orchestrator
+            try prompt.render(writer, config, .{
+                .cwd = cwd_path,
+                .home = home_path,
+                .status_code = prompt_args.status_code,
+                .cmd_duration = prompt_args.cmd_duration,
+                .shell = prompt_args.shell,
+                .io = init.io,
+            });
+
+            // Output the rendered prompt buffer in a single syscall
+            try std.Io.File.stdout().writeStreamingAll(init.io, prompt_buf[0..pos]);
+        },
+    }
+}
+
+fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Command {
     var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
 
-    _ = args.next(); // Skip executable name
+    const raw_exe = args.next() orelse "zap";
+    const exe_basename = std.fs.path.basename(raw_exe);
 
-    if (args.next()) |status_raw| {
-        res.status_code = std.fmt.parseInt(u8, status_raw, 10) catch 0;
+    const first_arg = args.next() orelse {
+        var p = Command{ .prompt = .{} };
+        if (init.environ_map.get("CMD_DURATION")) |cmd_dur_env| {
+            p.prompt.cmd_duration = std.fmt.parseInt(u64, cmd_dur_env, 10) catch 0;
+        }
+        return p;
+    };
+
+    if (std.ascii.eqlIgnoreCase(first_arg, "init")) {
+        const shell_name = args.next() orelse "generic";
+        const target_shell = init_mod.Shell.parse(shell_name) orelse .generic;
+        return Command{ .init = .{
+            .shell = target_shell,
+            .exe_name = if (exe_basename.len > 0) exe_basename else "zap",
+        } };
     }
 
-    if (args.next()) |duration_raw| {
-        res.cmd_duration = std.fmt.parseInt(u64, duration_raw, 10) catch 0;
-    } else if (init.environ_map.get("CMD_DURATION")) |cmd_dur_env| {
-        res.cmd_duration = std.fmt.parseInt(u64, cmd_dur_env, 10) catch 0;
+    var res = Command{ .prompt = .{} };
+    var positional_idx: usize = 0;
+
+    var current_arg: ?[]const u8 = first_arg;
+    if (std.ascii.eqlIgnoreCase(first_arg, "prompt")) {
+        current_arg = args.next();
+    }
+
+    while (current_arg) |arg| : (current_arg = args.next()) {
+        if (std.mem.eql(u8, arg, "--status") or std.mem.eql(u8, arg, "-s")) {
+            if (args.next()) |val| {
+                res.prompt.status_code = std.fmt.parseInt(u8, val, 10) catch 0;
+            }
+        } else if (std.mem.eql(u8, arg, "--duration") or std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--cmd-duration")) {
+            if (args.next()) |val| {
+                res.prompt.cmd_duration = std.fmt.parseInt(u64, val, 10) catch 0;
+            }
+        } else if (std.mem.eql(u8, arg, "--shell") or std.mem.eql(u8, arg, "-sh")) {
+            if (args.next()) |val| {
+                res.prompt.shell = init_mod.Shell.parse(val) orelse .generic;
+            }
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            if (positional_idx == 0) {
+                res.prompt.status_code = std.fmt.parseInt(u8, arg, 10) catch 0;
+                positional_idx += 1;
+            } else if (positional_idx == 1) {
+                res.prompt.cmd_duration = std.fmt.parseInt(u64, arg, 10) catch 0;
+                positional_idx += 1;
+            }
+        }
+    }
+
+    if (res.prompt.cmd_duration == 0) {
+        if (init.environ_map.get("CMD_DURATION")) |cmd_dur_env| {
+            res.prompt.cmd_duration = std.fmt.parseInt(u64, cmd_dur_env, 10) catch 0;
+        }
     }
 
     return res;

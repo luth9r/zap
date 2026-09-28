@@ -1,5 +1,7 @@
 .zig-cache/
 zig-out/
+result
+result-*
 
 *.o
 *.a

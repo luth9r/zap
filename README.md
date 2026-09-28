@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/luth9r/zap/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
   <a href="https://ziglang.org/"><img src="https://img.shields.io/badge/zig-0.16-orange.svg?style=flat-square&logo=zig" alt="Zig 0.16"></a>
-  <a href="#"><img src="https://img.shields.io/badge/memory-%3C1MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
+  <a href="#"><img src="https://img.shields.io/badge/memory-~1.2MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
 </p>
 
 [Build](#build) • [Configuration](#configuration) • [License](#license)
@@ -13,7 +13,7 @@
 </div>
 
 **A minimalist shell prompt written in Zig**
-Takes under 1 MB of memory (~800 KB RSS) and renders with virtually no latency.
+Takes ~1.2 MB of memory (~1280 KB Max RSS), zero heap allocations on prompt render path, and renders with sub-millisecond latency (< 1ms).
 
 ## Build
 
@@ -40,9 +40,7 @@ zig build test
 Add to `~/.config/fish/config.fish`:
 
 ```fish
-function fish_prompt
-    /path/to/zap $status $CMD_DURATION
-end
+zap init fish | source
 ```
 
 ### Zsh
@@ -50,8 +48,7 @@ end
 Add to `~/.zshrc`:
 
 ```zsh
-setopt PROMPT_SUBST
-PROMPT='$(/path/to/zap $? $CMD_DURATION)'
+eval "$(zap init zsh)"
 ```
 
 ### Bash
@@ -59,7 +56,15 @@ PROMPT='$(/path/to/zap $? $CMD_DURATION)'
 Add to `~/.bashrc`:
 
 ```bash
-PROMPT_COMMAND='PS1="$(/path/to/zap $? $CMD_DURATION)"'
+eval "$(zap init bash)"
+```
+
+### PowerShell
+
+Add to your `$PROFILE`:
+
+```powershell
+(&zap init powershell | Out-String) | Invoke-Expression
 ```
 
 ## Configuration

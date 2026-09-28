@@ -5,6 +5,8 @@ const git_utils = @import("../utils/git_utils.zig");
 
 pub const PromptContext = @import("../engine/context.zig").PromptContext;
 
+pub const is_git_dependent: bool = true;
+
 pub const GitBranchConfig = struct {
     // Format template for the git_branch module.
     format: []const u8 = "on [$symbol$branch]($style) ",
@@ -36,29 +38,31 @@ pub fn truncateBranch(
 /// Renders the git_branch module according to configuration.
 pub fn render(
     writer: anytype,
-    config: Config,
+    config: GitBranchConfig,
     ctx: PromptContext,
 ) !void {
-    if (config.git_branch.disabled) return;
+    if (config.disabled) return;
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var head_buf: [512]u8 = undefined;
+    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
 
-    const raw_branch = git_utils.getGitBranch(io, ctx.cwd, &git_dir_buf, &head_buf) orelse return;
+    var head_buf: [512]u8 = undefined;
+    const raw_branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf) orelse return;
 
     var trunc_buf: [256]u8 = undefined;
     const branch_str = truncateBranch(
         &trunc_buf,
         raw_branch,
-        config.git_branch.truncation_length,
-        config.git_branch.truncation_symbol,
+        config.truncation_length,
+        config.truncation_symbol,
     );
 
-    try formatter.formatTemplateWriter(writer, config.git_branch.format, .{
-        .style = config.git_branch.style,
+    try formatter.formatTemplateWriter(writer, config.format, .{
+        .style = config.style,
+        .shell = ctx.shell,
         .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = config.git_branch.symbol },
+            .{ .name = "symbol", .value = config.symbol },
             .{ .name = "branch", .value = branch_str },
             .{ .name = "remote_branch", .value = "" },
         },
@@ -81,21 +85,21 @@ test "truncateBranch below and above max_len" {
 test "render git_branch with powerline styled block and conditional remote" {
     const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 
-    var cfg = Config{};
-    cfg.git_branch.format = "  [](bold purple)[$symbol $branch(:$remote_branch)](fg:black bg:purple)[](bold purple) ";
-    cfg.git_branch.symbol = "";
-    cfg.git_branch.truncation_length = 15;
-    cfg.git_branch.truncation_symbol = "";
+    var cfg = GitBranchConfig{};
+    cfg.format = "  [](bold purple)[$symbol $branch(:$remote_branch)](fg:black bg:purple)[](bold purple) ";
+    cfg.symbol = "";
+    cfg.truncation_length = 15;
+    cfg.truncation_symbol = "";
 
     var buf: [512]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
 
     // Mock direct formatter with vars
-    try formatter.formatTemplateWriter(writer, cfg.git_branch.format, .{
-        .style = cfg.git_branch.style,
+    try formatter.formatTemplateWriter(writer, cfg.format, .{
+        .style = cfg.style,
         .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = cfg.git_branch.symbol },
+            .{ .name = "symbol", .value = cfg.symbol },
             .{ .name = "branch", .value = "main" },
             .{ .name = "remote_branch", .value = "" },
         },
@@ -108,15 +112,69 @@ test "render git_branch with powerline styled block and conditional remote" {
 test "render git_branch disabled" {
     const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 
-    var cfg = Config{};
-    cfg.git_branch.disabled = true;
-
+    var cfg = GitBranchConfig{};
+    cfg.disabled = true;
     var buf: [256]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
 
-    // Should return immediately without any output or IO calls
     try render(writer, cfg, .{ .cwd = "/some/path", .home = "." });
 
     try std.testing.expectEqual(@as(usize, 0), pos);
 }
+
+test "render git_branch across all shells" {
+    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+    const Shell = @import("../init/root.zig").Shell;
+    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+
+    var cfg = GitBranchConfig{};
+    cfg.format = "on [$symbol$branch]($style) ";
+    cfg.symbol = " ";
+
+    var buf: [512]u8 = undefined;
+    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+
+    for (shells) |sh| {
+        var pos: usize = 0;
+        const writer = BufferWriter.init(&buf, &pos);
+        try formatter.formatTemplateWriter(writer, cfg.format, .{
+            .style = cfg.style,
+            .shell = sh,
+            .vars = &[_]formatter.Variable{
+                .{ .name = "symbol", .value = cfg.symbol },
+                .{ .name = "branch", .value = "main" },
+                .{ .name = "remote_branch", .value = "" },
+            },
+        });
+        const out = buf[0..pos];
+        try assertValidShellAnsi(out, sh);
+    }
+
+    // Exact string verification for Bash
+    var pos_bash: usize = 0;
+    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_bash), cfg.format, .{
+        .style = cfg.style,
+        .shell = .bash,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "symbol", .value = cfg.symbol },
+            .{ .name = "branch", .value = "main" },
+            .{ .name = "remote_branch", .value = "" },
+        },
+    });
+    try std.testing.expectEqualStrings("on \x01\x1b[1;35m\x02 main\x01\x1b[0m\x02 ", buf[0..pos_bash]);
+
+    // Exact string verification for Zsh
+    var pos_zsh: usize = 0;
+    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_zsh), cfg.format, .{
+        .style = cfg.style,
+        .shell = .zsh,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "symbol", .value = cfg.symbol },
+            .{ .name = "branch", .value = "main" },
+            .{ .name = "remote_branch", .value = "" },
+        },
+    });
+    try std.testing.expectEqualStrings("on %{\x1b[1;35m%} main%{\x1b[0m%} ", buf[0..pos_zsh]);
+}
+

@@ -28,15 +28,12 @@ pub fn parseHeadContent(content_raw: []const u8) ?[]const u8 {
     return content;
 }
 
-/// Resolves the current git branch name or short commit SHA from cwd.
-pub fn getGitBranch(
+/// Resolves the current git branch name or short commit SHA directly from git_dir.
+pub fn getGitBranchFromDir(
     io: std.Io,
-    cwd: []const u8,
-    git_dir_buf: *[std.fs.max_path_bytes]u8,
+    git_dir: []const u8,
     head_content_buf: *[512]u8,
 ) ?[]const u8 {
-    const git_dir = fs.findGitDir(io, cwd, git_dir_buf) orelse return null;
-
     var head_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const head_path = std.fmt.bufPrint(&head_path_buf, "{s}/HEAD", .{git_dir}) catch return null;
 
@@ -50,6 +47,17 @@ pub fn getGitBranch(
     if (bytes_read == 0) return null;
 
     return parseHeadContent(head_content_buf[0..bytes_read]);
+}
+
+/// Resolves the current git branch name or short commit SHA from cwd.
+pub fn getGitBranch(
+    io: std.Io,
+    cwd: []const u8,
+    git_dir_buf: *[std.fs.max_path_bytes]u8,
+    head_content_buf: *[512]u8,
+) ?[]const u8 {
+    const git_dir = fs.findGitDir(io, cwd, git_dir_buf) orelse return null;
+    return getGitBranchFromDir(io, git_dir, head_content_buf);
 }
 
 pub fn matchPackedRef(line: []const u8, ref_name: []const u8, out_buf: []u8) ?[]const u8 {
