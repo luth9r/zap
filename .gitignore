@@ -26,4 +26,3 @@ dist/
 
 *.tar.gz
 *.zip
-scripts/build-release.sh
