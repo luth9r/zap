@@ -1,0 +1,98 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux-musl
+            name: zap-x86_64-linux
+            archive: zap-${{ github.ref_name }}-x86_64-linux.tar.gz
+            exe: zap
+            cmd: tar -czf
+          - target: aarch64-linux-musl
+            name: zap-aarch64-linux
+            archive: zap-${{ github.ref_name }}-aarch64-linux.tar.gz
+            exe: zap
+            cmd: tar -czf
+          - target: x86_64-windows
+            name: zap-x86_64-windows
+            archive: zap-${{ github.ref_name }}-x86_64-windows.zip
+            exe: zap.exe
+            cmd: zip -j
+          - target: x86_64-macos
+            name: zap-x86_64-macos
+            archive: zap-${{ github.ref_name }}-x86_64-macos.tar.gz
+            exe: zap
+            cmd: tar -czf
+          - target: aarch64-macos
+            name: zap-aarch64-macos
+            archive: zap-${{ github.ref_name }}-aarch64-macos.tar.gz
+            exe: zap
+            cmd: tar -czf
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Zig 0.16
+        uses: mlugg/setup-zig@v1
+        with:
+          version: master
+
+      - name: Build binary for ${{ matrix.target }}
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+
+      - name: Package archive
+        run: |
+          cd zig-out/bin
+          if [ "${{ matrix.target }}" = "x86_64-windows" ]; then
+            zip -j ../../${{ matrix.archive }} zap.exe
+          else
+            tar -czf ../../${{ matrix.archive }} zap
+          fi
+          cd ../..
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.archive }}
+
+  publish-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate Checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

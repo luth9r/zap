@@ -180,10 +180,12 @@ pub fn parseIndexAndWorktree(
 
 /// Checks if there are any untracked files in the repository without invoking child processes.
 pub fn checkUntracked(io: std.Io, work_dir: []const u8, git_dir: []const u8) bool {
-    return checkUntrackedDir(io, work_dir, git_dir, "");
+    return checkUntrackedDir(io, work_dir, git_dir, "", 0);
 }
 
-fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_prefix: []const u8) bool {
+fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_prefix: []const u8, depth: usize) bool {
+    if (depth > 6) return false;
+
     var full_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const current_dir_path = if (rel_prefix.len == 0)
         work_dir
@@ -199,6 +201,12 @@ fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_
 
     while (it.next(io) catch null) |entry| {
         if (entry.name.len == 0 or entry.name[0] == '.') continue;
+        if (std.mem.eql(u8, entry.name, "node_modules") or
+            std.mem.eql(u8, entry.name, "target") or
+            std.mem.eql(u8, entry.name, "zig-out") or
+            std.mem.eql(u8, entry.name, ".zig-cache") or
+            std.mem.eql(u8, entry.name, "dist") or
+            std.mem.eql(u8, entry.name, "build")) continue;
 
         const child_rel = if (rel_prefix.len == 0)
             entry.name
@@ -210,7 +218,7 @@ fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_
 
         switch (entry.kind) {
             .directory => {
-                if (checkUntrackedDir(io, work_dir, git_dir, child_rel)) {
+                if (checkUntrackedDir(io, work_dir, git_dir, child_rel, depth + 1)) {
                     return true;
                 }
             },

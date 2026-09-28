@@ -14,14 +14,14 @@ Choose your operating system or package manager below:
 
 ```bash [Linux (x86_64)]
 # Download and extract the latest static binary
-curl -sSL https://github.com/luth9r/zap/releases/latest/download/zap-v0.1.0-x86_64-linux.tar.gz | tar -xz
+curl -sSL https://github.com/luth9r/zap/releases/latest/download/zap-v1.0.0-x86_64-linux.tar.gz | tar -xz
 # Move binary to your PATH
 mkdir -p ~/.local/bin && mv zap ~/.local/bin/
 ```
 
 ```powershell [Windows (x86_64)]
 # Download the latest release zip from GitHub Releases
-Invoke-WebRequest -Uri "https://github.com/luth9r/zap/releases/latest/download/zap-v0.1.0-x86_64-windows.zip" -OutFile "$env:TEMP\zap.zip"
+Invoke-WebRequest -Uri "https://github.com/luth9r/zap/releases/latest/download/zap-v1.0.0-x86_64-windows.zip" -OutFile "$env:TEMP\zap.zip"
 Expand-Archive -Path "$env:TEMP\zap.zip" -DestinationPath "$env:USERPROFILE\bin" -Force
 ```
 

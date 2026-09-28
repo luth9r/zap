@@ -3,6 +3,12 @@ zig-out/
 result
 result-*
 
+node_modules/
+**/node_modules/
+dist/
+.vitepress/dist/
+.vitepress/cache/
+
 *.o
 *.a
 *.so

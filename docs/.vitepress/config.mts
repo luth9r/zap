@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress';
+import pkg from '../package.json';
 
 export default defineConfig({
   title: 'zap',
@@ -7,7 +8,8 @@ export default defineConfig({
   cleanUrls: true,
 
   head: [
-    ['link', { rel: 'icon', href: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>󱐋</text></svg>' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/zap/favicon.svg' }],
+    ['link', { rel: 'alternate icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['link', { rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/symbols-nerd-font.css' }],
     ['link', { rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/jetbrainsmono.css' }],
     ['meta', { name: 'theme-color', content: '#bd93f9' }]
@@ -15,13 +17,19 @@ export default defineConfig({
 
   themeConfig: {
     siteTitle: 'zap',
-    logo: undefined,
+    logo: '/favicon.svg',
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Configuration', link: '/guide/configuration' },
       { text: 'Modules', link: '/config/directory' },
-      { text: 'v0.1.0', link: 'https://github.com/luth9r/zap/releases' }
+      {
+        text: `v${pkg.version}`,
+        items: [
+          { text: 'Releases & Changelog', link: 'https://github.com/luth9r/zap/releases' },
+          { text: 'GitHub Repository', link: 'https://github.com/luth9r/zap' }
+        ]
+      }
     ],
 
     sidebar: [
