@@ -12,7 +12,6 @@ pub const git_branch = @import("modules/git_branch.zig");
 pub const git_commit = @import("modules/git_commit.zig");
 pub const git_state = @import("modules/git_state.zig");
 pub const git_status = @import("modules/git_status.zig");
-pub const git_metrics = @import("modules/git_metrics.zig");
 pub const registry = @import("modules/registry.zig");
 pub const context = @import("engine/context.zig");
 pub const buffer_writer = @import("utils/buffer_writer.zig");

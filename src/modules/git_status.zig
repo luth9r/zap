@@ -232,3 +232,95 @@ test "render git_status disabled" {
 
     try std.testing.expectEqual(@as(usize, 0), pos);
 }
+
+test "integration: full git_status module rendering with custom symbols and all flags" {
+    var cfg = Config{};
+    cfg.git_status.format = "[[$all_status $ahead_behind]]($style) ";
+    cfg.git_status.style = "bold red";
+    cfg.git_status.conflicted = "=";
+    cfg.git_status.stashed = "$";
+    cfg.git_status.deleted = "✘";
+    cfg.git_status.renamed = "»";
+    cfg.git_status.modified = "!";
+    cfg.git_status.staged = "+";
+    cfg.git_status.untracked = "?";
+    cfg.git_status.diverged = "⇕";
+    cfg.git_status.ahead = "⇡";
+    cfg.git_status.behind = "⇣";
+
+    const info = git_utils.GitStatusInfo{
+        .conflicted = true,
+        .stashed = true,
+        .deleted = true,
+        .renamed = true,
+        .modified = true,
+        .staged = true,
+        .untracked = true,
+        .ahead = 4,
+        .behind = 2,
+    };
+
+    var all_status_buf: [128]u8 = undefined;
+    const all_status_str = formatAllStatus(&all_status_buf, cfg.git_status, info);
+    try std.testing.expectEqualStrings("=$✘»!+?", all_status_str);
+
+    var ahead_behind_buf: [64]u8 = undefined;
+    const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, cfg.git_status, info.ahead, info.behind);
+    try std.testing.expectEqualStrings("⇕4 2", ahead_behind_str);
+
+    var buf: [512]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+
+    try formatter.formatTemplateWriter(writer, cfg.git_status.format, .{
+        .style = cfg.git_status.style,
+        .vars = &[_]formatter.Variable{
+            .{ .name = "all_status", .value = all_status_str },
+            .{ .name = "ahead_behind", .value = ahead_behind_str },
+            .{ .name = "stashed", .value = if (info.stashed) cfg.git_status.stashed else "" },
+            .{ .name = "modified", .value = if (info.modified) cfg.git_status.modified else "" },
+            .{ .name = "staged", .value = if (info.staged) cfg.git_status.staged else "" },
+            .{ .name = "untracked", .value = if (info.untracked) cfg.git_status.untracked else "" },
+            .{ .name = "renamed", .value = if (info.renamed) cfg.git_status.renamed else "" },
+            .{ .name = "deleted", .value = if (info.deleted) cfg.git_status.deleted else "" },
+            .{ .name = "conflicted", .value = if (info.conflicted) cfg.git_status.conflicted else "" },
+        },
+    });
+
+    const expected = "\x1b[1;31m[=$✘»!+? ⇕4 2]\x1b[0m ";
+    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+}
+
+test "integration: individual status variables in custom template" {
+    var cfg = Config{};
+    cfg.git_status.format = "(C:$conflicted )(S:$stashed )(M:$modified )(A:$staged )(U:$untracked )(R:$renamed )(D:$deleted )";
+
+    var buf: [512]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+
+    const info = git_utils.GitStatusInfo{
+        .conflicted = true,
+        .stashed = false,
+        .modified = true,
+        .staged = true,
+        .untracked = true,
+        .renamed = true,
+        .deleted = true,
+    };
+
+    try formatter.formatTemplateWriter(writer, cfg.git_status.format, .{
+        .vars = &[_]formatter.Variable{
+            .{ .name = "conflicted", .value = if (info.conflicted) "=" else "" },
+            .{ .name = "stashed", .value = if (info.stashed) "$" else "" },
+            .{ .name = "modified", .value = if (info.modified) "!" else "" },
+            .{ .name = "staged", .value = if (info.staged) "+" else "" },
+            .{ .name = "untracked", .value = if (info.untracked) "?" else "" },
+            .{ .name = "renamed", .value = if (info.renamed) "»" else "" },
+            .{ .name = "deleted", .value = if (info.deleted) "✘" else "" },
+        },
+    });
+
+    const expected = "C:= M:! A:+ U:? R:» D:✘ ";
+    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+}

@@ -203,7 +203,7 @@ test "render prompt with all git modules in root format" {
     const writer = BufferWriter.init(&buf, &pos);
     var cfg = Config{};
     cfg.add_newline = false;
-    cfg.format = "$directory$git_branch$git_commit$git_state$git_status$git_metrics$character";
+    cfg.format = "$directory$git_branch$git_commit$git_state$git_status$character";
 
     try formatter.formatTemplateWriter(writer, cfg.format, .{
         .vars = &[_]formatter.Variable{
@@ -212,12 +212,11 @@ test "render prompt with all git modules in root format" {
             .{ .name = "git_commit", .value = "\x1b[1;32m(4cd65cc)\x1b[0m " },
             .{ .name = "git_state", .value = "(\x1b[1;33mREBASING 1/3\x1b[0m) " },
             .{ .name = "git_status", .value = "\x1b[1;31m[!+]\x1b[0m " },
-            .{ .name = "git_metrics", .value = "\x1b[1;32m+10\x1b[0m \x1b[1;31m-2\x1b[0m " },
             .{ .name = "character", .value = "\x1b[1;32m❯\x1b[0m " },
         },
     });
 
-    const expected = "\x1b[1;36m~/zap\x1b[0m on \x1b[1;35mmain\x1b[0m \x1b[1;32m(4cd65cc)\x1b[0m (\x1b[1;33mREBASING 1/3\x1b[0m) \x1b[1;31m[!+]\x1b[0m \x1b[1;32m+10\x1b[0m \x1b[1;31m-2\x1b[0m \x1b[1;32m❯\x1b[0m ";
+    const expected = "\x1b[1;36m~/zap\x1b[0m on \x1b[1;35mmain\x1b[0m \x1b[1;32m(4cd65cc)\x1b[0m (\x1b[1;33mREBASING 1/3\x1b[0m) \x1b[1;31m[!+]\x1b[0m \x1b[1;32m❯\x1b[0m ";
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 

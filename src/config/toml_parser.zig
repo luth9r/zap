@@ -262,7 +262,7 @@ test "parse git_branch and git_status sections" {
     try std.testing.expectEqual(false, cfg.git_status.disabled);
 }
 
-test "parse git_commit, git_state and git_metrics sections" {
+test "parse git_commit and git_state sections" {
     const toml_text =
         \\[git_commit]
         \\style = "bold green"
@@ -275,12 +275,6 @@ test "parse git_commit, git_state and git_metrics sections" {
         \\style = "bold yellow"
         \\rebase = "REBASE-IN-PROGRESS"
         \\merge = "MERGE-CONFLICT"
-        \\disabled = false
-        \\
-        \\[git_metrics]
-        \\added_style = "green"
-        \\deleted_style = "red"
-        \\only_nonzero_diffs = false
         \\disabled = false
     ;
 
@@ -297,11 +291,6 @@ test "parse git_commit, git_state and git_metrics sections" {
     try std.testing.expectEqualStrings("REBASE-IN-PROGRESS", cfg.git_state.rebase);
     try std.testing.expectEqualStrings("MERGE-CONFLICT", cfg.git_state.merge);
     try std.testing.expectEqual(false, cfg.git_state.disabled);
-
-    try std.testing.expectEqualStrings("green", cfg.git_metrics.added_style);
-    try std.testing.expectEqualStrings("red", cfg.git_metrics.deleted_style);
-    try std.testing.expectEqual(false, cfg.git_metrics.only_nonzero_diffs);
-    try std.testing.expectEqual(false, cfg.git_metrics.disabled);
 }
 
 test "parse multiline format strings with triple quotes" {

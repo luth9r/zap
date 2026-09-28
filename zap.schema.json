@@ -284,38 +284,6 @@
         }
       }
     },
-    "git_metrics": {
-      "type": "object",
-      "description": "Git additions/deletions line metrics rendering configuration",
-      "additionalProperties": false,
-      "properties": {
-        "format": {
-          "type": "string",
-          "default": "([+$added]($added_style) )([-$deleted]($deleted_style) )",
-          "description": "Format template for the git_metrics module"
-        },
-        "added_style": {
-          "$ref": "#/definitions/Style",
-          "default": "bold green",
-          "description": "Style string for added lines"
-        },
-        "deleted_style": {
-          "$ref": "#/definitions/Style",
-          "default": "bold red",
-          "description": "Style string for deleted lines"
-        },
-        "only_nonzero_diffs": {
-          "type": "boolean",
-          "default": true,
-          "description": "Only render metrics when diffs are non-zero"
-        },
-        "disabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Disables the git_metrics module (default = true for latency)"
-        }
-      }
-    },
     "cmd_duration": {
       "type": "object",
       "description": "Execution duration rendering configuration",

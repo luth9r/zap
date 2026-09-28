@@ -78,7 +78,7 @@ zap searches for configuration in:
 add_newline = true
 
 format = """
-[┌─](bold purple)[ X ](bold purple)$directory$git_branch$git_commit$git_state$git_status$git_metrics$cmd_duration
+[┌─](bold purple)[ X ](bold purple)$directory$git_branch$git_commit$git_state$git_status$cmd_duration
 [└─](bold purple)[ ⚡ ](bold yellow)$character"""
 
 [directory]
@@ -116,10 +116,6 @@ format = "([\\[$all_status$ahead_behind\\]]($style) )"
 style = "bold red"
 disabled = false
 
-[git_metrics]
-format = "([+$added]($added_style) )([-$deleted]($deleted_style) )"
-disabled = true
-
 [cmd_duration]
 min_time = 2000
 format = "took [$duration]($style) "
@@ -152,8 +148,8 @@ Styles inside `[text](style)` or module `style` settings support:
 Zap supports a rich template engine for prompt layout and module formatting.
 
 ### Variables & Modules
-* **Modules**: `$directory`, `$git_branch`, `$git_commit`, `$git_state`, `$git_status`, `$git_metrics`, `$cmd_duration`, `$character`
-* **Module inner variables**: `$path`, `$branch`, `$remote_branch`, `$hash`, `$tag`, `$state`, `$progress_current`, `$progress_total`, `$all_status`, `$ahead_behind`, `$staged`, `$modified`, `$untracked`, `$renamed`, `$deleted`, `$stashed`, `$added`, `$deleted`, `$duration`, `$symbol`, `$style`
+* **Modules**: `$directory`, `$git_branch`, `$git_commit`, `$git_state`, `$git_status`, `$cmd_duration`, `$character`
+* **Module inner variables**: `$path`, `$branch`, `$remote_branch`, `$hash`, `$tag`, `$state`, `$progress_current`, `$progress_total`, `$all_status`, `$ahead_behind`, `$staged`, `$modified`, `$untracked`, `$renamed`, `$deleted`, `$stashed`, `$duration`, `$symbol`, `$style`
 
 ### Escape Character (`\`)
 Use a backslash `\` before any character to escape it and output it literally without triggering template processing:
