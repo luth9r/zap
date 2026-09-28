@@ -166,10 +166,11 @@ pub fn getGitStatusForDir(
     info.behind = ab.behind;
 
     // 4. Index & Worktree (modified, deleted, conflicted)
-    parseIndexAndWorktree(io, work_dir, git_dir, &info);
+    const start_time = std.Io.Clock.awake.now(io);
+    parseIndexAndWorktree(io, work_dir, git_dir, &info, start_time);
 
     // 5. Untracked
-    info.untracked = checkUntracked(io, work_dir, git_dir);
+    info.untracked = checkUntracked(io, work_dir, git_dir, start_time);
 
     return info;
 }

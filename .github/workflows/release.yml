@@ -44,10 +44,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Zig 0.16
-        uses: mlugg/setup-zig@v1
-        with:
-          version: master
+      - name: Setup Zig
+        run: |
+          ZIG_URL=$(curl -sSL https://ziglang.org/download/index.json | jq -r '.master."x86_64-linux".tarball')
+          mkdir -p /tmp/zig-install
+          curl -sSL "$ZIG_URL" | tar -xJ -C /tmp/zig-install --strip-components=1
+          echo "/tmp/zig-install" >> $GITHUB_PATH
+          /tmp/zig-install/zig version
 
       - name: Build binary for ${{ matrix.target }}
         run: |

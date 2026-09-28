@@ -1,6 +1,13 @@
 const std = @import("std");
 const ignore = @import("ignore.zig");
 
+pub const SCAN_TIMEOUT_MS: u64 = 30;
+
+pub fn isTimedOut(start_time: anytype, io: std.Io) bool {
+    const now = std.Io.Clock.awake.now(io);
+    return start_time.durationTo(now).toMilliseconds() >= SCAN_TIMEOUT_MS;
+}
+
 pub const GitStatusInfo = struct {
     staged: bool = false,
     modified: bool = false,
@@ -84,12 +91,13 @@ pub fn isPathTrackedInIndex(io: std.Io, git_dir: []const u8, name: []const u8) b
     return false;
 }
 
-/// Parses .git/index and compares tracked files against filesystem without child processes.
+/// Parses .git/index and compares tracked files against filesystem with deadline timeout.
 pub fn parseIndexAndWorktree(
     io: std.Io,
     work_dir: []const u8,
     git_dir: []const u8,
     info: *GitStatusInfo,
+    start_time: anytype,
 ) void {
     var index_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const index_path = std.fmt.bufPrint(&index_path_buf, "{s}/index", .{git_dir}) catch return;
@@ -113,8 +121,11 @@ pub fn parseIndexAndWorktree(
     var entry_idx: usize = 0;
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     var full_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const ns_per_s: u64 = 1_000_000_000;
 
     while (entry_idx < num_entries) : (entry_idx += 1) {
+        if (entry_idx % 64 == 0 and isTimedOut(start_time, io)) break;
+
         if (version == 2 or version == 3) {
             var entry_hdr: [62]u8 = undefined;
             const hdr_read = file_reader.interface.readSliceShort(&entry_hdr) catch break;
@@ -160,7 +171,7 @@ pub fn parseIndexAndWorktree(
                 defer item_file.close(io);
                 if (item_file.stat(io)) |stat| {
                     const disk_size: u64 = stat.size;
-                    const disk_mtime_sec = @as(u32, @truncate(@as(u64, @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_s)))));
+                    const disk_mtime_sec = @as(u32, @truncate(@as(u64, @intCast(@divTrunc(stat.mtime.nanoseconds, ns_per_s)))));
                     if (disk_size != @as(u64, file_size) or disk_mtime_sec != mtime_sec) {
                         info.modified = true;
                     }
@@ -178,13 +189,13 @@ pub fn parseIndexAndWorktree(
     }
 }
 
-/// Checks if there are any untracked files in the repository without invoking child processes.
-pub fn checkUntracked(io: std.Io, work_dir: []const u8, git_dir: []const u8) bool {
-    return checkUntrackedDir(io, work_dir, git_dir, "", 0);
+/// Checks if there are any untracked files in the repository with a strict deadline timeout.
+pub fn checkUntracked(io: std.Io, work_dir: []const u8, git_dir: []const u8, start_time: anytype) bool {
+    return checkUntrackedDir(io, work_dir, git_dir, "", 0, start_time);
 }
 
-fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_prefix: []const u8, depth: usize) bool {
-    if (depth > 6) return false;
+fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_prefix: []const u8, depth: usize, start_time: anytype) bool {
+    if (depth > 6 or isTimedOut(start_time, io)) return false;
 
     var full_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const current_dir_path = if (rel_prefix.len == 0)
@@ -200,6 +211,7 @@ fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_
     var child_rel_buf: [std.fs.max_path_bytes]u8 = undefined;
 
     while (it.next(io) catch null) |entry| {
+        if (isTimedOut(start_time, io)) return false;
         if (entry.name.len == 0 or entry.name[0] == '.') continue;
         if (std.mem.eql(u8, entry.name, "node_modules") or
             std.mem.eql(u8, entry.name, "target") or
@@ -218,7 +230,7 @@ fn checkUntrackedDir(io: std.Io, work_dir: []const u8, git_dir: []const u8, rel_
 
         switch (entry.kind) {
             .directory => {
-                if (checkUntrackedDir(io, work_dir, git_dir, child_rel, depth + 1)) {
+                if (checkUntrackedDir(io, work_dir, git_dir, child_rel, depth + 1, start_time)) {
                     return true;
                 }
             },
