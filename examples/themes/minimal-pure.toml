@@ -1,0 +1,34 @@
+"$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"
+
+# Minimal Pure
+add_newline = false
+format = "$directory$git_branch$git_status$cmd_duration$character"
+
+[directory]
+format = "[$path](bold cyan) "
+style = "bold cyan"
+truncation_length = 3
+truncate_to_repo = true
+
+[git_branch]
+format = "on [ $branch](bold purple) "
+style = "bold purple"
+
+[git_status]
+format = "[[$all_status$ahead_behind]](bold red) "
+style = "bold red"
+staged = "+"
+modified = "!"
+untracked = "?"
+ahead = "⇡"
+behind = "⇣"
+diverged = "⇕"
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration](bold yellow) "
+style = "bold yellow"
+
+[character]
+success_symbol = "[❯](bold green) "
+error_symbol = "[❯](bold red) "

@@ -19,7 +19,7 @@ features:
     details: Optimized prompt rendering pipeline in < 1ms to keep your terminal responsive and snappy.
   - icon: 󰌾
     title: Zero Heap Allocations
-    details: Zero heap allocations on the hot render path, using ~1.2 MB Max RSS memory.
+    details: Zero heap allocations on the hot render path, using ~6 MB Max RSS memory.
   - icon: 󰊢
     title: Deep Git Integration
     details: Real-time tracking of branch, status, detached commits, stash, ahead/behind, rebase/merge states.

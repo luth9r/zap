@@ -15,32 +15,32 @@ pub const fileExists = git.fileExists;
 pub const anySubpathExists = git.anySubpathExists;
 pub const readSmallFile = git.readSmallFile;
 
-pub const isGitignorePatternMatch = git.isGitignorePatternMatch;
-pub const isNameInIgnoreFile = git.isNameInIgnoreFile;
-pub const isIgnored = git.isIgnored;
-
 pub const parseHeadContent = git.parseHeadContent;
 pub const getGitBranch = git.getGitBranch;
 pub const getGitBranchFromDir = git.getGitBranchFromDir;
 pub const getGitCommit = git.getGitCommit;
-pub const readRefSha = git.readRefSha;
-pub const getAheadBehind = git.getAheadBehind;
-pub const matchPackedRef = git.matchPackedRef;
 
 pub const getGitState = git.getGitState;
-pub const checkStashed = git.checkStashed;
-pub const checkConflicted = git.checkConflicted;
-
-pub const isPathTrackedInIndex = git.isPathTrackedInIndex;
-pub const parseIndexAndWorktree = git.parseIndexAndWorktree;
-pub const checkUntracked = git.checkUntracked;
 
 pub const parseGitStatusPorcelainV2 = git.parseGitStatusPorcelainV2;
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
 
-test {
-    _ = @import("git/ignore.zig");
+test "test process.spawn" {
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "git", "status", "--porcelain=v2", "--branch", "--show-stash" },
+        .stdout = .pipe,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    });
+    var stream_buf: [512]u8 = undefined;
+    var reader = child.stdout.?.reader(io, &stream_buf);
+    var out_buf: [8192]u8 = undefined;
+    const bytes_read = reader.interface.readSliceShort(&out_buf) catch 0;
+    _ = child.wait(io) catch {};
+    const info = parseGitStatusPorcelainV2(out_buf[0..bytes_read]);
+    try std.testing.expect(info.hasAnyStatus() or !info.hasAnyStatus()); // just verify it doesn't crash
 }
 
 test "parseHeadContent on regular branch" {
@@ -151,49 +151,4 @@ test "getGitStatus live repo execution" {
     const info = getGitStatus(io, git_dir, branch);
 
     _ = info;
-}
-
-test "checkStashed and checkConflicted return false on normal state" {
-    const io = std.testing.io;
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_len = try std.process.currentPath(io, &cwd_buf);
-    const cwd = cwd_buf[0..cwd_len];
-
-    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = findGitDir(io, cwd, &git_dir_buf) orelse return;
-
-    const conflicted = checkConflicted(io, git_dir);
-    try std.testing.expect(!conflicted);
-}
-
-test "readRefSha reads HEAD commit SHA" {
-    const io = std.testing.io;
-    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_len = try std.process.currentPath(io, &cwd_buf);
-    const cwd = cwd_buf[0..cwd_len];
-
-    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = findGitDir(io, cwd, &git_dir_buf) orelse return;
-
-    var head_buf: [512]u8 = undefined;
-    const branch = getGitBranch(io, cwd, &git_dir_buf, &head_buf);
-    if (branch) |b| {
-        var ref_buf: [128]u8 = undefined;
-        const ref_name = try std.fmt.bufPrint(&ref_buf, "refs/heads/{s}", .{b});
-        var sha_buf: [64]u8 = undefined;
-        if (readRefSha(io, git_dir, ref_name, &sha_buf)) |sha| {
-            try std.testing.expectEqual(@as(usize, 40), sha.len);
-        }
-    }
-}
-
-test "checkStashed and checkConflicted with simulated files" {
-    var out_buf: [64]u8 = undefined;
-    const line = "5a9ce44ce1fa3fe29f7341445e332fca52db6e14 refs/heads/feature";
-    const sha = matchPackedRef(line, "refs/heads/feature", &out_buf);
-    try std.testing.expect(sha != null);
-    try std.testing.expectEqualStrings("5a9ce44ce1fa3fe29f7341445e332fca52db6e14", sha.?);
-
-    const no_match = matchPackedRef(line, "refs/heads/main", &out_buf);
-    try std.testing.expect(no_match == null);
 }

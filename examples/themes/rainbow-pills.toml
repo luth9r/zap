@@ -1,0 +1,35 @@
+"$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"
+
+# Rainbow Pills (Independent rounded segment bubbles)
+add_newline = false
+format = "$directory $git_branch$git_status $cmd_duration $character"
+
+[directory]
+format = "[](fg:#6366F1)[  $path ](bold fg:#FFFFFF bg:#6366F1)[](fg:#6366F1)"
+style = "none"
+truncation_length = 3
+truncate_to_repo = false
+
+[git_branch]
+format = "[](fg:#8B5CF6)[  $branch](bold fg:#FFFFFF bg:#8B5CF6)"
+style = "none"
+
+[git_status]
+format = "[[ $all_status$ahead_behind]](bold fg:#FDE047 bg:#8B5CF6)[](fg:#8B5CF6)"
+style = "none"
+staged = "+ "
+modified = "! "
+untracked = "? "
+ahead = "⇡"
+behind = "⇣"
+diverged = "⇕"
+
+[cmd_duration]
+min_time = 0
+format = "[](fg:#EC4899)[ 󱐋 $duration ](bold fg:#FFFFFF bg:#EC4899)[](fg:#EC4899)"
+style = "none"
+
+[character]
+format = "[](fg:#10B981)[ ❯ ](bold fg:#FFFFFF bg:#10B981)[](fg:#10B981) "
+success_symbol = "[](fg:#10B981)[ ❯ ](bold fg:#FFFFFF bg:#10B981)[](fg:#10B981) "
+error_symbol = "[](fg:#EF4444)[ ✘ ](bold fg:#FFFFFF bg:#EF4444)[](fg:#EF4444) "

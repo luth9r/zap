@@ -18,23 +18,6 @@ pub const GitStateResult = struct {
     progress_total: []const u8 = "",
 };
 
-/// Checks if stashed changes exist by inspecting .git/refs/stash and .git/logs/refs/stash.
-pub fn checkStashed(io: std.Io, git_dir: []const u8) bool {
-    return fs.anySubpathExists(io, git_dir, &.{
-        "refs/stash",
-        "logs/refs/stash",
-    });
-}
-
-/// Checks for active merge or conflict state files in .git directory.
-pub fn checkConflicted(io: std.Io, git_dir: []const u8) bool {
-    return fs.anySubpathExists(io, git_dir, &.{
-        "MERGE_HEAD",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-    });
-}
-
 /// Detects the active git operation state (REBASING, MERGING, CHERRY-PICKING, REVERTING, etc.).
 pub fn getGitState(
     io: std.Io,

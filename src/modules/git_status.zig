@@ -116,7 +116,7 @@ pub fn render(
 
     var head_buf: [512]u8 = undefined;
     const branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf);
-    const info = git_utils.getGitStatus(io, git_dir, branch);
+    const info = git_utils.getGitStatusForDir(io, ctx.cwd, git_dir, branch);
 
     // If nothing to report and no status symbols, return early
     if (!info.hasAnyStatus()) return;

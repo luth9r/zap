@@ -1,13 +1,34 @@
 const std = @import("std");
 
 pub const fs = @import("fs.zig");
-pub const ignore = @import("ignore.zig");
 pub const refs = @import("refs.zig");
 pub const state = @import("state.zig");
-pub const index = @import("index.zig");
+
+// Status flags and info
+pub const GitStatusInfo = struct {
+    staged: bool = false,
+    modified: bool = false,
+    untracked: bool = false,
+    renamed: bool = false,
+    deleted: bool = false,
+    stashed: bool = false,
+    conflicted: bool = false,
+    ahead: usize = 0,
+    behind: usize = 0,
+
+    pub fn hasAnyStatus(self: GitStatusInfo) bool {
+        inline for (@typeInfo(GitStatusInfo).@"struct".fields) |field| {
+            if (field.type == bool) {
+                if (@field(self, field.name)) return true;
+            } else if (field.type == usize or field.type == u64 or field.type == u32) {
+                if (@field(self, field.name) > 0) return true;
+            }
+        }
+        return false;
+    }
+};
 
 // Re-export common types
-pub const GitStatusInfo = index.GitStatusInfo;
 pub const GitCommitResult = refs.GitCommitResult;
 pub const GitStateType = state.GitStateType;
 pub const GitStateResult = state.GitStateResult;
@@ -19,25 +40,12 @@ pub const fileExists = fs.fileExists;
 pub const anySubpathExists = fs.anySubpathExists;
 pub const readSmallFile = fs.readSmallFile;
 
-pub const isGitignorePatternMatch = ignore.isGitignorePatternMatch;
-pub const isNameInIgnoreFile = ignore.isNameInIgnoreFile;
-pub const isIgnored = ignore.isIgnored;
-
 pub const parseHeadContent = refs.parseHeadContent;
 pub const getGitBranch = refs.getGitBranch;
 pub const getGitBranchFromDir = refs.getGitBranchFromDir;
 pub const getGitCommit = refs.getGitCommit;
-pub const readRefSha = refs.readRefSha;
-pub const getAheadBehind = refs.getAheadBehind;
-pub const matchPackedRef = refs.matchPackedRef;
 
 pub const getGitState = state.getGitState;
-pub const checkStashed = state.checkStashed;
-pub const checkConflicted = state.checkConflicted;
-
-pub const isPathTrackedInIndex = index.isPathTrackedInIndex;
-pub const parseIndexAndWorktree = index.parseIndexAndWorktree;
-pub const checkUntracked = index.checkUntracked;
 
 /// High-level struct representing an opened Git repository.
 pub const GitRepo = struct {
@@ -136,41 +144,41 @@ pub fn parseGitStatusPorcelainV2(output: []const u8) GitStatusInfo {
     return info;
 }
 
-/// Retrieves git status info directly from .git directory with zero child processes and zero dynamic allocations.
+/// Retrieves git status info for the repository by invoking git child process.
 pub fn getGitStatus(io: std.Io, git_dir: []const u8, branch_name: ?[]const u8) GitStatusInfo {
     const work_dir = std.fs.path.dirname(git_dir) orelse ".";
     return getGitStatusForDir(io, work_dir, git_dir, branch_name);
 }
 
-/// Computes git status for the given work directory and git directory natively.
+/// Computes git status for the given work directory by spawning git status child process.
 pub fn getGitStatusForDir(
     io: std.Io,
     work_dir: []const u8,
     git_dir_opt: ?[]const u8,
     branch_name: ?[]const u8,
 ) GitStatusInfo {
-    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = git_dir_opt orelse (findGitDir(io, work_dir, &git_dir_buf) orelse return .{});
+    _ = git_dir_opt;
+    _ = branch_name;
+    var child = std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "git", "status", "--porcelain=v2", "--branch", "--show-stash" },
+        .cwd = .{ .path = work_dir },
+        .stdout = .pipe,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    }) catch return .{};
 
-    var info = GitStatusInfo{};
+    var stream_buf: [512]u8 = undefined;
+    var reader = child.stdout.?.reader(io, &stream_buf);
+    var out_buf: [65536]u8 = undefined;
+    var total_read: usize = 0;
 
-    // 1. Check stash
-    info.stashed = checkStashed(io, git_dir);
+    while (total_read < out_buf.len) {
+        const n = reader.interface.readSliceShort(out_buf[total_read..]) catch 0;
+        if (n == 0) break;
+        total_read += n;
+    }
 
-    // 2. Check conflict markers (MERGE_HEAD, etc.)
-    info.conflicted = checkConflicted(io, git_dir);
+    _ = child.wait(io) catch {};
 
-    // 3. Ahead / Behind
-    const ab = getAheadBehind(io, git_dir, branch_name);
-    info.ahead = ab.ahead;
-    info.behind = ab.behind;
-
-    // 4. Index & Worktree (modified, deleted, conflicted)
-    const start_time = std.Io.Clock.awake.now(io);
-    parseIndexAndWorktree(io, work_dir, git_dir, &info, start_time);
-
-    // 5. Untracked
-    info.untracked = checkUntracked(io, work_dir, git_dir, start_time);
-
-    return info;
+    return parseGitStatusPorcelainV2(out_buf[0..total_read]);
 }

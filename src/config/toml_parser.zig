@@ -19,7 +19,10 @@ pub fn loadConfigFile(
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const config_path = resolveConfigPathBuf(&path_buf, EnvAdapter.get) orelse return;
 
-    const file = std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return;
+    const file = if (std.fs.path.isAbsolute(config_path))
+        std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return
+    else
+        std.Io.Dir.cwd().openFile(io, config_path, .{}) catch return;
     defer file.close(io);
 
     var stream_buf: [4096]u8 = undefined;

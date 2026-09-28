@@ -1,0 +1,35 @@
+"$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"
+
+# Catppuccin Mocha Palette
+add_newline = false
+format = "$directory$git_branch$git_status[](fg:#CBA6F7 bg:#89B4FA)$cmd_duration[](fg:#89B4FA bg:#A6E3A1)$character"
+
+[directory]
+format = "[](fg:#F38BA8)[ 󰝰 $path ](bold fg:#11111B bg:#F38BA8)[](fg:#F38BA8 bg:#CBA6F7)"
+style = "none"
+truncation_length = 3
+truncate_to_repo = false
+
+[git_branch]
+format = "[  $branch ](bold fg:#11111B bg:#CBA6F7)"
+style = "none"
+
+[git_status]
+format = "[[$all_status$ahead_behind ]](bold fg:#45475A bg:#CBA6F7)"
+style = "none"
+staged = "󰐖 "
+modified = "󰏫 "
+untracked = "󰞋 "
+ahead = "⇡"
+behind = "⇣"
+diverged = "⇕"
+
+[cmd_duration]
+min_time = 0
+format = "[ 󱐋 $duration ](bold fg:#11111B bg:#89B4FA)"
+style = "none"
+
+[character]
+format = "[ 󰄬 ](bold fg:#11111B bg:#A6E3A1)[](fg:#A6E3A1) "
+success_symbol = "[ 󰄬 ](bold fg:#11111B bg:#A6E3A1)[](fg:#A6E3A1) "
+error_symbol = "[ 󰅚 ](bold fg:#11111B bg:#F38BA8)[](fg:#F38BA8) "

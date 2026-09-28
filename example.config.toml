@@ -4,6 +4,13 @@
 # ZAP CONFIGURATION CHEATSHEET & EXAMPLES
 # ==============================================================================
 #
+# Ready-to-use complete themes are available in `examples/themes/`:
+#   - powerline-warm.toml     (Sunset Powerline gradient)
+#   - catppuccin-mocha.toml    (Catppuccin pastel palette)
+#   - rainbow-pills.toml       (Rounded capsule bubbles)
+#   - two-line-frame.toml      (Two-line prompt with frame)
+#   - minimal-pure.toml        (Clean minimalist prompt)
+#
 # 1. TEXT MODIFIERS:
 #    - bold, dimmed (or dim), italic, underline (or underlined),
 #    - blink, inverted (or invert), hidden, strikethrough, reset, none

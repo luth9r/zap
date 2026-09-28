@@ -5,19 +5,40 @@
 <p align="center">
   <a href="https://github.com/luth9r/zap/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
   <a href="https://ziglang.org/"><img src="https://img.shields.io/badge/zig-0.16-orange.svg?style=flat-square&logo=zig" alt="Zig 0.16"></a>
-  <a href="#"><img src="https://img.shields.io/badge/memory-~1.2MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
+  <a href="#"><img src="https://img.shields.io/badge/memory-~6MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
   <a href="#"><img src="https://img.shields.io/badge/latency-%3C1ms-blue.svg?style=flat-square" alt="Latency"></a>
 </p>
 
 **A minimalist, zero-allocation shell prompt written in Zig**
 
-~1.2 MB RSS · sub-millisecond latency · zero heap allocations on render
+~6 MB RSS · sub-millisecond latency · zero heap allocations on render
 
-[Documentation](https://luth9r.github.io/zap/) • [Installation](#installation) • [Shell Setup](#shell-setup) • [Configuration](#configuration) • [License](#license)
+<p align="center">
+  <img src="assets/demo.png" alt="zap demo prompt" />
+</p>
+
+[Documentation](https://luth9r.github.io/zap/) • [Themes](#themes--presets) • [Installation](#installation) • [Shell Setup](#shell-setup) • [Configuration](#configuration) • [License](#license)
 
 </div>
 
 ---
+
+## Themes & Presets
+
+Zap comes with customizable themes in the [`examples/themes/`](examples/themes/) directory:
+
+| Theme | Preview | Config |
+| :--- | :--- | :--- |
+| **Powerline Warm** | ![Powerline Warm](assets/screenshots/powerline-warm.png) | [`powerline-warm.toml`](examples/themes/powerline-warm.toml) |
+| **Catppuccin Mocha** | ![Catppuccin Mocha](assets/screenshots/catppuccin-mocha.png) | [`catppuccin-mocha.toml`](examples/themes/catppuccin-mocha.toml) |
+| **Rainbow Pills** | ![Rainbow Pills](assets/screenshots/rainbow-pills.png) | [`rainbow-pills.toml`](examples/themes/rainbow-pills.toml) |
+| **Two-Line Frame** | ![Two-Line Frame](assets/screenshots/two-line-frame.png) | [`two-line-frame.toml`](examples/themes/two-line-frame.toml) |
+| **Minimal Pure** | ![Minimal Pure](assets/screenshots/minimal-pure.png) | [`minimal-pure.toml`](examples/themes/minimal-pure.toml) |
+
+To try any theme directly:
+```bash
+ZAP_CONFIG=examples/themes/powerline-warm.toml zap prompt --duration 1200
+```
 
 ## Installation
 
