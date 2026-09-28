@@ -5,13 +5,13 @@
 <p align="center">
   <a href="https://github.com/luth9r/zap/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="License: MIT"></a>
   <a href="https://ziglang.org/"><img src="https://img.shields.io/badge/zig-0.16-orange.svg?style=flat-square&logo=zig" alt="Zig 0.16"></a>
-  <a href="#"><img src="https://img.shields.io/badge/memory-~1.2MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
+  <a href="#"><img src="https://img.shields.io/badge/memory-~6MB-brightgreen.svg?style=flat-square" alt="Memory Usage"></a>
   <a href="#"><img src="https://img.shields.io/badge/latency-%3C1ms-blue.svg?style=flat-square" alt="Latency"></a>
 </p>
 
 **A minimalist, zero-allocation shell prompt written in Zig**
 
-~1.2 MB RSS · sub-millisecond latency · zero heap allocations on render
+~6 MB RSS · sub-millisecond latency · zero heap allocations on render
 
 [Documentation](https://luth9r.github.io/zap/) • [Installation](#installation) • [Shell Setup](#shell-setup) • [Configuration](#configuration) • [License](#license)
 
