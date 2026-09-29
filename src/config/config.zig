@@ -7,6 +7,7 @@ pub const GitStateConfig = @import("../modules/git_state.zig").GitStateConfig;
 pub const GitStatusConfig = @import("../modules/git_status.zig").GitStatusConfig;
 pub const CmdDurationConfig = @import("../modules/cmd_duration.zig").CmdDurationConfig;
 pub const CharacterConfig = @import("../modules/character.zig").CharacterConfig;
+pub const OsConfig = @import("../modules/os.zig").OsConfig;
 
 pub const Config = struct {
     // Root prompt format string orchestrating module layout.
@@ -27,4 +28,6 @@ pub const Config = struct {
     cmd_duration: CmdDurationConfig = .{},
     // Character module configuration.
     character: CharacterConfig = .{},
+    // Os symbol configuration.
+    os: OsConfig = .{},
 };

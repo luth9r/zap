@@ -1,5 +1,4 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
 const formatter = @import("../engine/formatter.zig");
 const git_utils = @import("../utils/git_utils.zig");
 
@@ -185,4 +184,3 @@ test "render git_state across all shells" {
     });
     try std.testing.expectEqualStrings("(%{\x1b[1;33m%}REBASING%{\x1b[0m%}) ", buf[0..pos_zsh]);
 }
-

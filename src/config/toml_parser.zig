@@ -380,3 +380,18 @@ test "resolveConfigPathBuf falls back to HOME/.config/zap/config.toml" {
     try std.testing.expectEqualStrings("/home/user/.config/zap/config.toml", path);
 }
 
+test "parse os section" {
+    const toml_text =
+        \\[os]
+        \\disabled = false
+        \\style = "bold yellow"
+        \\symbol = ""
+    ;
+
+    var cfg = Config{};
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqual(false, cfg.os.disabled);
+    try std.testing.expectEqualStrings("bold yellow", cfg.os.style);
+    try std.testing.expectEqualStrings("", cfg.os.symbol);
+}

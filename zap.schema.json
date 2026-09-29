@@ -342,6 +342,33 @@
           "description": "Disables the character module"
         }
       }
+    },
+    "os" : {
+      "type": "object",
+      "description": "Current system logo indicator",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "[$symbol]($style) ",
+          "description": "Format template for the os module"
+        },
+        "style": {
+          "type": "string",
+          "default": "bold white",
+          "description": "Style string for the os logo"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Disables the os module"
+        },
+        "symbol": {
+          "type": "string",
+          "default": "",
+          "description": "Custom OS symbol override. If omitted or empty, automatically detected based on the current OS/distribution."
+        }
+      }
     }
   },
   "definitions": {

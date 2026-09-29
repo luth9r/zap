@@ -53,7 +53,8 @@ export default defineConfig({
           { text: 'git_state', link: '/config/git-state' },
           { text: 'git_status', link: '/config/git-status' },
           { text: 'cmd_duration', link: '/config/cmd-duration' },
-          { text: 'character', link: '/config/character' }
+          { text: 'character', link: '/config/character' },
+          { text: 'os', link: '/config/os' }
         ]
       }
     ],

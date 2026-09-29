@@ -13,15 +13,15 @@ Choose your operating system or package manager below:
 ::: code-group
 
 ```bash [Linux (x86_64)]
-# Download and extract the latest static binary
-curl -sSL https://github.com/luth9r/zap/releases/latest/download/zap-v1.0.0-x86_64-linux.tar.gz | tar -xz
+# Download and extract the static binary
+curl -sSL https://github.com/luth9r/zap/releases/download/v1.0.0/zap-v1.0.0-x86_64-linux.tar.gz | tar -xz
 # Move binary to your PATH
 mkdir -p ~/.local/bin && mv zap ~/.local/bin/
 ```
 
 ```powershell [Windows (x86_64)]
-# Download the latest release zip from GitHub Releases
-Invoke-WebRequest -Uri "https://github.com/luth9r/zap/releases/latest/download/zap-v1.0.0-x86_64-windows.zip" -OutFile "$env:TEMP\zap.zip"
+# Download the release zip from GitHub Releases
+Invoke-WebRequest -Uri "https://github.com/luth9r/zap/releases/download/v1.0.0/zap-v1.0.0-x86_64-windows.zip" -OutFile "$env:TEMP\zap.zip"
 Expand-Archive -Path "$env:TEMP\zap.zip" -DestinationPath "$env:USERPROFILE\bin" -Force
 ```
 
@@ -48,7 +48,7 @@ Expand-Archive -Path "$env:TEMP\zap.zip" -DestinationPath "$env:USERPROFILE\bin"
 {
   programs.zap = {
     enable = true;
-    
+
     # Automatically generates ~/.config/zap/config.toml from Nix!
     settings = {
       add_newline = true;
@@ -84,7 +84,7 @@ cp zig-out/bin/zap ~/.local/bin/
 
 ## Step 2. Set up your shell to use zap
 
-> *(Note: If you are using the Home Manager module above, shell integration for Bash, Zsh, and Fish is enabled automatically!)*
+> _(Note: If you are using the Home Manager module above, shell integration for Bash, Zsh, and Fish is enabled automatically!)_
 
 Configure your shell to initialize zap on startup. Choose your shell from the list below:
 
@@ -119,6 +119,7 @@ eval "$(zap init bash)"
 Start a new shell session, and you should see your new minimalist prompt.
 
 If you are looking to further customize zap:
+
 - **[Configuration](/guide/configuration)** — Learn how to set up your `config.toml`, customize formatting, and enable schema auto-completion.
 - **[Styling & Colors](/guide/styling)** — Explore 24-bit TrueColor, ANSI 256 colors, text modifiers, and background/foreground styling.
 - **[Modules](/config/directory)** — Detailed option reference for each prompt module (`$directory`, `$git_branch`, `$git_status`, etc.).

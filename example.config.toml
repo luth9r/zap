@@ -50,9 +50,9 @@
 add_newline = true
 
 # Root prompt format string.
-# Supports modules ($directory, $git_branch, $git_commit, $git_state, $git_status, $cmd_duration, $character),
+# Supports modules ($os, $directory, $git_branch, $git_commit, $git_state, $git_status, $cmd_duration, $character),
 # multiline strings ("""..."""), styled blocks [content](style), and escaping (\$ for literal '$').
-format = "$directory$git_branch$git_commit$git_state$git_status$cmd_duration$character"
+format = "$os$directory$git_branch$git_commit$git_state$git_status$cmd_duration$character"
 
 [directory]
 format = "[$path]($style)[$read_only]($read_only_style) "
@@ -121,4 +121,9 @@ disabled = false
 format = "$symbol "
 success_symbol = "[❯](bold green)"
 error_symbol = "[❯](bold red)"
+disabled = false
+
+[os]
+format = "[$symbol]($style) "
+style = "bold white"
 disabled = false

@@ -10,6 +10,7 @@ Variables are prefixed with `$` and expanded dynamically during rendering.
 
 | Variable | Description |
 |---|---|
+| `$os` | Operating system / distribution logo module |
 | `$directory` | Current working directory module |
 | `$git_branch` | Active Git branch module |
 | `$git_commit` | Git commit hash and tag module |

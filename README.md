@@ -27,15 +27,16 @@
 
 Zap comes with customizable themes in the [`examples/themes/`](examples/themes/) directory:
 
-| Theme | Preview | Config |
-| :--- | :--- | :--- |
-| **Powerline Warm** | ![Powerline Warm](assets/screenshots/powerline-warm.png) | [`powerline-warm.toml`](examples/themes/powerline-warm.toml) |
+| Theme                | Preview                                                      | Config                                                           |
+| :------------------- | :----------------------------------------------------------- | :--------------------------------------------------------------- |
+| **Powerline Warm**   | ![Powerline Warm](assets/screenshots/powerline-warm.png)     | [`powerline-warm.toml`](examples/themes/powerline-warm.toml)     |
 | **Catppuccin Mocha** | ![Catppuccin Mocha](assets/screenshots/catppuccin-mocha.png) | [`catppuccin-mocha.toml`](examples/themes/catppuccin-mocha.toml) |
-| **Rainbow Pills** | ![Rainbow Pills](assets/screenshots/rainbow-pills.png) | [`rainbow-pills.toml`](examples/themes/rainbow-pills.toml) |
-| **Two-Line Frame** | ![Two-Line Frame](assets/screenshots/two-line-frame.png) | [`two-line-frame.toml`](examples/themes/two-line-frame.toml) |
-| **Minimal Pure** | ![Minimal Pure](assets/screenshots/minimal-pure.png) | [`minimal-pure.toml`](examples/themes/minimal-pure.toml) |
+| **Rainbow Pills**    | ![Rainbow Pills](assets/screenshots/rainbow-pills.png)       | [`rainbow-pills.toml`](examples/themes/rainbow-pills.toml)       |
+| **Two-Line Frame**   | ![Two-Line Frame](assets/screenshots/two-line-frame.png)     | [`two-line-frame.toml`](examples/themes/two-line-frame.toml)     |
+| **Minimal Pure**     | ![Minimal Pure](assets/screenshots/minimal-pure.png)         | [`minimal-pure.toml`](examples/themes/minimal-pure.toml)         |
 
 To try any theme directly:
+
 ```bash
 ZAP_CONFIG=examples/themes/powerline-warm.toml zap prompt --duration 1200
 ```
@@ -48,7 +49,7 @@ Pre-compiled static binaries are available on the [Releases](https://github.com/
 
 ```bash
 # Linux x86_64
-curl -sSL https://github.com/luth9r/zap/releases/latest/download/zap-v1.0.0-x86_64-linux.tar.gz | tar -xz
+curl -sSL https://github.com/luth9r/zap/releases/download/v1.0.0/zap-v1.0.0-x86_64-linux.tar.gz | tar -xz
 mkdir -p ~/.local/bin && mv zap ~/.local/bin/
 ```
 
@@ -132,7 +133,7 @@ truncation_length = 3
 truncate_to_repo = true
 
 [git_branch]
-symbol = " "
+symbol = "⎇ "
 style = "bold purple"
 
 [git_status]
