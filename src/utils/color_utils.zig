@@ -101,7 +101,7 @@ pub fn parseColorAlloc(allocator: std.mem.Allocator, raw_name: []const u8, fallb
     return rendered;
 }
 
-test "parse standard and bold colors correctly" {
+test "unit: parse standard and bold colors correctly" {
     try std.testing.expectEqualStrings("\x1b[32m", parseColor("green", ""));
     try std.testing.expectEqualStrings("\x1b[31m", parseColor("red", ""));
     try std.testing.expectEqualStrings("\x1b[36m", parseColor("cyan", ""));
@@ -115,7 +115,7 @@ test "parse standard and bold colors correctly" {
     try std.testing.expectEqualStrings("default", parseColor("unknown", "default"));
 }
 
-test "parseColorAlloc handles style strings" {
+test "unit: parseColorAlloc handles style strings" {
     const a = std.testing.allocator;
 
     const res_hex = parseColorAlloc(a, "#bf5700", "");

@@ -416,7 +416,7 @@ fn extractVarName(slice: []const u8) []const u8 {
 }
 
 const TestVar = enum { user, host, price, symbol, duration, path, missing, text, version };
-test "plain text template" {
+test "unit: plain text template" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){};
 
@@ -426,7 +426,7 @@ test "plain text template" {
     try testing.expectEqualStrings("hello world", res);
 }
 
-test "variable expansion outside styled groups" {
+test "unit: variable expansion outside styled groups" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -441,7 +441,7 @@ test "variable expansion outside styled groups" {
     try testing.expectEqualStrings("luther@nixos: ", res);
 }
 
-test "escaped characters" {
+test "unit: escaped characters" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -455,7 +455,7 @@ test "escaped characters" {
     try testing.expectEqualStrings("$price is [100]", res);
 }
 
-test "styled group with explicit style" {
+test "unit: styled group with explicit style" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -469,7 +469,7 @@ test "styled group with explicit style" {
     try testing.expectEqualStrings("\x1b[1;32m➜\x1b[0m", res);
 }
 
-test "styled group with $style context" {
+test "unit: styled group with $style context" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .style = "bold yellow",
@@ -484,7 +484,7 @@ test "styled group with $style context" {
     try testing.expectEqualStrings("took \x1b[1;33m2s\x1b[0m ", res);
 }
 
-test "advanced style strings inside format" {
+test "unit: advanced style strings inside format" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -498,7 +498,7 @@ test "advanced style strings inside format" {
     try testing.expectEqualStrings("in \x1b[4;37;48;2;191;87;0m~/projects/zap\x1b[0m ", res);
 }
 
-test "conditional group inside styled bracket" {
+test "unit: conditional group inside styled bracket" {
     const a = testing.allocator;
 
     // Case 1: version is empty -> ($version ) should be skipped
@@ -528,7 +528,7 @@ test "conditional group inside styled bracket" {
     try testing.expectEqualStrings("\x1b[1;32m➜ v1.0\x1b[0m", res2);
 }
 
-test "empty group produces empty string" {
+test "unit: empty group produces empty string" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .style = "bold red",
@@ -542,7 +542,7 @@ test "empty group produces empty string" {
     try testing.expectEqualStrings("", res);
 }
 
-test "multiple styled groups and consecutive blocks" {
+test "unit: multiple styled groups and consecutive blocks" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -557,7 +557,7 @@ test "multiple styled groups and consecutive blocks" {
     try testing.expectEqualStrings("\x1b[1;36m~/zap\x1b[0m \x1b[1;32m➜\x1b[0m ", res);
 }
 
-test "escaped brackets inside styled group" {
+test "unit: escaped brackets inside styled group" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){
         .vars = &[_]Variable(TestVar){
@@ -571,7 +571,7 @@ test "escaped brackets inside styled group" {
     try testing.expectEqualStrings("\x1b[1;32m[➜]\x1b[0m", res);
 }
 
-test "unmatched brackets handled as literal text" {
+test "unit: unmatched brackets handled as literal text" {
     const a = testing.allocator;
     const ctx = FormatContext(TestVar){};
 
@@ -581,7 +581,7 @@ test "unmatched brackets handled as literal text" {
     try testing.expectEqualStrings("normal [text without style) and (parentheses)", res);
 }
 
-test "shell zero-width escape wrapping" {
+test "unit: shell zero-width escape wrapping" {
     const a = testing.allocator;
     const ctx_bash = FormatContext(TestVar){
         .shell = .bash,

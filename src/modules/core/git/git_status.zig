@@ -146,7 +146,7 @@ pub fn render(
     });
 }
 
-test "formatAllStatus and formatAheadBehind" {
+test "unit: formatAllStatus and formatAheadBehind" {
     const cfg = GitStatusConfig{};
     const info = git_utils.GitStatusInfo{
         .modified = true,
@@ -165,7 +165,7 @@ test "formatAllStatus and formatAheadBehind" {
     try std.testing.expectEqualStrings("⇕1 2", formatAheadBehind(&ab_buf, cfg, 1, 2));
 }
 
-test "formatAllStatus with conflicted, deleted, and renamed flags" {
+test "unit: formatAllStatus with conflicted, deleted, and renamed flags" {
     const cfg = GitStatusConfig{};
     const info = git_utils.GitStatusInfo{
         .conflicted = true,

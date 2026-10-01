@@ -152,7 +152,7 @@ pub fn render(
     });
 }
 
-test "fromDistroId resolves common distros" {
+test "unit: fromDistroId resolves common distros" {
     try testing.expectEqual(TargetOs.arch, TargetOs.fromDistroId("arch"));
     try testing.expectEqual(TargetOs.ubuntu, TargetOs.fromDistroId("\"ubuntu\""));
     try testing.expectEqual(TargetOs.fedora, TargetOs.fromDistroId("Fedora"));
@@ -160,7 +160,7 @@ test "fromDistroId resolves common distros" {
     try testing.expectEqual(TargetOs.linux, TargetOs.fromDistroId("unknown_distro"));
 }
 
-test "default symbols match nerd fonts" {
+test "unit: default symbols match nerd fonts" {
     try testing.expectEqualStrings("󰣇", TargetOs.arch.defaultSymbol());
     try testing.expectEqualStrings("󰕈", TargetOs.ubuntu.defaultSymbol());
     try testing.expectEqualStrings("", TargetOs.fedora.defaultSymbol());

@@ -83,6 +83,45 @@ pub const Style = struct {
         return style;
     }
 
+    pub fn isValidToken(token: []const u8) bool {
+        if (std.ascii.eqlIgnoreCase(token, "none")) return true;
+        if (std.ascii.eqlIgnoreCase(token, "bold") or
+            std.ascii.eqlIgnoreCase(token, "dimmed") or std.ascii.eqlIgnoreCase(token, "dim") or
+            std.ascii.eqlIgnoreCase(token, "italic") or
+            std.ascii.eqlIgnoreCase(token, "underline") or std.ascii.eqlIgnoreCase(token, "underlined") or
+            std.ascii.eqlIgnoreCase(token, "blink") or
+            std.ascii.eqlIgnoreCase(token, "inverted") or std.ascii.eqlIgnoreCase(token, "invert") or
+            std.ascii.eqlIgnoreCase(token, "hidden") or
+            std.ascii.eqlIgnoreCase(token, "strikethrough") or
+            std.ascii.eqlIgnoreCase(token, "reset")) return true;
+
+        if (std.mem.startsWith(u8, token, "fg:") or std.mem.startsWith(u8, token, "FG:")) {
+            const color_val = token[3..];
+            if (std.ascii.eqlIgnoreCase(color_val, "none")) return true;
+            return parseColorToken(color_val, false) != null;
+        }
+        if (std.mem.startsWith(u8, token, "bg:") or std.mem.startsWith(u8, token, "BG:")) {
+            const color_val = token[3..];
+            if (std.ascii.eqlIgnoreCase(color_val, "none")) return true;
+            return parseColorToken(color_val, true) != null;
+        }
+
+        return parseColorToken(token, false) != null;
+    }
+
+    pub fn validate(raw_style: []const u8) ?[]const u8 {
+        const trimmed = std.mem.trim(u8, raw_style, " \t\r\n");
+        if (trimmed.len == 0) return null;
+
+        var it = std.mem.tokenizeAny(u8, trimmed, " \t\r\n");
+        while (it.next()) |token| {
+            if (!isValidToken(token)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
     fn parseColorToken(token: []const u8, is_bg: bool) ?ColorType {
         const trimmed = std.mem.trim(u8, token, " \t");
         if (trimmed.len == 0) return null;
@@ -292,7 +331,7 @@ pub fn renderStyleBuf(buf: []u8, style_str: []const u8) ?[]const u8 {
     return style.toAnsiBuf(buf);
 }
 
-test "empty string or none produces empty ansi" {
+test "unit: empty string or none produces empty ansi" {
     const a = testing.allocator;
 
     const res_empty = try renderStyle(a, "");
@@ -308,7 +347,7 @@ test "empty string or none produces empty ansi" {
     try testing.expectEqualStrings("", res_spaces);
 }
 
-test "named foreground and background colors" {
+test "unit: named foreground and background colors" {
     const a = testing.allocator;
 
     const res_green = try renderStyle(a, "green");
@@ -328,7 +367,7 @@ test "named foreground and background colors" {
     try testing.expectEqualStrings("\x1b[32;44m", res_fg_bg);
 }
 
-test "bright colors and aliases" {
+test "unit: bright colors and aliases" {
     const a = testing.allocator;
 
     const res_gray = try renderStyle(a, "gray");
@@ -348,7 +387,7 @@ test "bright colors and aliases" {
     try testing.expectEqualStrings("\x1b[35m", res_purple);
 }
 
-test "modifiers: bold, italic, underline, dimmed, inverted, strikethrough" {
+test "unit: modifiers: bold, italic, underline, dimmed, inverted, strikethrough" {
     const a = testing.allocator;
 
     const res_bold = try renderStyle(a, "bold");
@@ -368,7 +407,7 @@ test "modifiers: bold, italic, underline, dimmed, inverted, strikethrough" {
     try testing.expectEqualStrings("\x1b[4m", res_underline);
 }
 
-test "8-bit ANSI 256 colors" {
+test "unit: 8-bit ANSI 256 colors" {
     const a = testing.allocator;
 
     const res_27 = try renderStyle(a, "27");
@@ -388,7 +427,7 @@ test "8-bit ANSI 256 colors" {
     try testing.expectEqualStrings("\x1b[48;5;200m", res_bg_200);
 }
 
-test "24-bit TrueColor Hex colors" {
+test "unit: 24-bit TrueColor Hex colors" {
     const a = testing.allocator;
 
     const res_hex = try renderStyle(a, "#bf5700");
@@ -404,7 +443,7 @@ test "24-bit TrueColor Hex colors" {
     try testing.expectEqualStrings("\x1b[38;2;255;255;255m", res_short_hex);
 }
 
-test "examples from documentation" {
+test "unit: examples from documentation" {
     const a = testing.allocator;
 
     // 'fg:green bg:blue' sets green text on a blue background
@@ -441,3 +480,20 @@ test "examples from documentation" {
     const buf_res = renderStyleBuf(&buf, "bold green").?;
     try testing.expectEqualStrings("\x1b[1;32m", buf_res);
 }
+
+test "unit: validate style strings" {
+    try testing.expect(Style.validate("bold green") == null);
+    try testing.expect(Style.validate("fg:red bg:blue underline") == null);
+    try testing.expect(Style.validate("bg:#bf5700 fg:255") == null);
+    try testing.expect(Style.validate("none") == null);
+    try testing.expect(Style.validate("") == null);
+
+    // Invalid tokens
+    try testing.expectEqualStrings("invalidcolor", Style.validate("bold invalidcolor").?);
+    try testing.expectEqualStrings("fg:unknowncolor", Style.validate("fg:unknowncolor").?);
+    try testing.expectEqualStrings("fg:299", Style.validate("fg:299").?); // out of range 256
+    try testing.expectEqualStrings("#12345", Style.validate("#12345").?); // bad hex length
+}
+
+
+

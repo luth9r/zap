@@ -137,7 +137,7 @@ pub fn formatPathTruncatedBuf(
     }
 }
 
-test "replaces HOME prefix with default tilde" {
+test "unit: replaces HOME prefix with default tilde" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const home = "/home/user";
     const cwd = "/home/user/projects/zap";
@@ -146,7 +146,7 @@ test "replaces HOME prefix with default tilde" {
     try testing.expectEqualStrings("~/projects/zap", result);
 }
 
-test "replaces HOME prefix with custom configured symbol" {
+test "unit: replaces HOME prefix with custom configured symbol" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const home = "/home/user";
     const cwd = "/home/user/projects/zap";
@@ -155,7 +155,7 @@ test "replaces HOME prefix with custom configured symbol" {
     try testing.expectEqualStrings("?>/projects/zap", result);
 }
 
-test "handles exact HOME match with custom symbol" {
+test "unit: handles exact HOME match with custom symbol" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const home = "/home/user";
     const cwd = "/home/user";
@@ -164,7 +164,7 @@ test "handles exact HOME match with custom symbol" {
     try testing.expectEqualStrings("?>", result);
 }
 
-test "formatPathTruncatedBuf with truncation length" {
+test "unit: formatPathTruncatedBuf with truncation length" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const home = "/home/user";
     const cwd = "/home/user/projects/zap/src/modules";
@@ -182,7 +182,7 @@ test "formatPathTruncatedBuf with truncation length" {
     try testing.expectEqualStrings("~/projects/zap/src/modules", res5);
 }
 
-test "formatPathTruncatedBuf with repo root" {
+test "unit: formatPathTruncatedBuf with repo root" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const home = "/home/user";
     const repo_root = "/home/user/projects/zap";

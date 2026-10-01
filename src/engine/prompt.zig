@@ -104,7 +104,7 @@ pub fn render(writer: anytype, config: config_mod.Config, ctx: PromptContext) !v
     });
 }
 
-test "render prompt with default configuration" {
+test "unit: render prompt with default configuration" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -122,7 +122,7 @@ test "render prompt with default configuration" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render prompt with error status and custom symbols" {
+test "unit: render prompt with error status and custom symbols" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -141,7 +141,7 @@ test "render prompt with error status and custom symbols" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render prompt with disabled module" {
+test "unit: render prompt with disabled module" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -161,7 +161,7 @@ test "render prompt with disabled module" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render prompt with custom root format" {
+test "unit: render prompt with custom root format" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -183,7 +183,7 @@ test "render prompt with custom root format" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render multiline prompt with colored frame symbols" {
+test "unit: render multiline prompt with colored frame symbols" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -205,7 +205,7 @@ test "render multiline prompt with colored frame symbols" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render prompt with cmd_duration module" {
+test "unit: render prompt with cmd_duration module" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -239,7 +239,7 @@ test "render prompt with cmd_duration module" {
     try testing.expectEqualStrings(expected2, buf[0..pos]);
 }
 
-test "render prompt with git_status module variables" {
+test "unit: render prompt with git_status module variables" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -260,7 +260,7 @@ test "render prompt with git_status module variables" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "render prompt with all git modules in root format" {
+test "unit: render prompt with all git modules in root format" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
@@ -283,7 +283,7 @@ test "render prompt with all git modules in root format" {
     try testing.expectEqualStrings(expected, buf[0..pos]);
 }
 
-test "computeActiveModulesMask bitmask calculation" {
+test "unit: computeActiveModulesMask bitmask calculation" {
     // 0: directory, 1: git_branch, 2: git_commit, 3: git_state, 4: git_status, 5: cmd_duration, 6: character
     const mask1 = computeActiveModulesMask("$directory$character");
     try testing.expectEqual(@as(u16, (1 << 0) | (1 << 6)), mask1);

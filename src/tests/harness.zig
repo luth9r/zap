@@ -354,6 +354,95 @@ pub const Harness = struct {
         return out_copy;
     }
 
+    pub const ExecResult = struct {
+        stdout: []const u8,
+        stderr: []const u8,
+        exit_code: u8,
+    };
+
+    /// Spawns the zap binary with custom CLI arguments and returns stdout on success.
+    pub fn execZap(self: *Harness, args: []const []const u8) ![]const u8 {
+        const res = try self.execZapAllowFail(args);
+        if (res.exit_code != 0) {
+            std.debug.print(
+                \\
+                \\[HARNESS ERROR] zap exited with code {d}
+                \\[HARNESS ERROR] Stderr: {s}
+                \\[HARNESS ERROR] Stdout: {s}
+                \\
+            , .{ res.exit_code, res.stderr, res.stdout });
+            return error.ZapExitedWithError;
+        }
+        return res.stdout;
+    }
+
+    /// Spawns the zap binary with custom CLI arguments and returns ExecResult.
+    pub fn execZapAllowFail(self: *Harness, args: []const []const u8) !ExecResult {
+        const alloc = self.arena.allocator();
+        const current_home = self.custom_home orelse self.tmp_dir;
+        const current_pwd = self.custom_cwd orelse self.tmp_dir;
+
+        const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
+        const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
+        const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
+        const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
+        const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
+
+        const full_argv = try alloc.alloc([]const u8, 7 + args.len);
+        var argc: usize = 0;
+        full_argv[argc] = "env"; argc += 1;
+        full_argv[argc] = home_env; argc += 1;
+        full_argv[argc] = userprofile_env; argc += 1;
+        full_argv[argc] = pwd_env; argc += 1;
+        full_argv[argc] = xdg_env; argc += 1;
+        full_argv[argc] = appdata_env; argc += 1;
+        full_argv[argc] = self.zap_bin; argc += 1;
+        @memcpy(full_argv[argc .. argc + args.len], args);
+        argc += args.len;
+
+        const io = std.testing.io;
+        var child = try std.process.spawn(io, .{
+            .argv = full_argv[0..argc],
+            .cwd = .{ .path = current_pwd },
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .stdin = .ignore,
+        });
+
+        var stream_buf: [512]u8 = undefined;
+        var reader = child.stdout.?.reader(io, &stream_buf);
+        var out_buf: [65536]u8 = undefined;
+        var total_read: usize = 0;
+        while (total_read < out_buf.len) {
+            const n = reader.interface.readSliceShort(out_buf[total_read..]) catch break;
+            if (n == 0) break;
+            total_read += n;
+        }
+
+        var err_stream_buf: [256]u8 = undefined;
+        var err_reader = child.stderr.?.reader(io, &err_stream_buf);
+        var err_buf: [4096]u8 = undefined;
+        var err_read: usize = 0;
+        while (err_read < err_buf.len) {
+            const n = err_reader.interface.readSliceShort(err_buf[err_read..]) catch break;
+            if (n == 0) break;
+            err_read += n;
+        }
+
+        const term = child.wait(io) catch return error.ZapCrashed;
+        const code: u8 = switch (term) {
+            .exited => |c| c,
+            else => return error.ZapCrashed,
+        };
+
+        return ExecResult{
+            .stdout = try alloc.dupe(u8, out_buf[0..total_read]),
+            .stderr = try alloc.dupe(u8, err_buf[0..err_read]),
+            .exit_code = code,
+        };
+    }
+
+
     /// Run `zap prompt`, then pipe the output through a real shell to validate
     /// it doesn't crash or produce syntax errors in that shell.
     /// Returns the shell's stdout (the prompt as the shell interprets it).
@@ -555,7 +644,7 @@ pub const Harness = struct {
 //  and serve as examples for module authors
 // ═══════════════════════════════════════════════════════════════
 
-test "harness: basic prompt renders non-empty output" {
+test "integration: harness: basic prompt renders non-empty output" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -563,7 +652,7 @@ test "harness: basic prompt renders non-empty output" {
     try Harness.expectNotEmpty(out);
 }
 
-test "harness: default prompt with bash ANSI wrapping" {
+test "integration: harness: default prompt with bash ANSI wrapping" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -572,7 +661,7 @@ test "harness: default prompt with bash ANSI wrapping" {
     try Harness.expectAnsi(out, .bash);
 }
 
-test "harness: default prompt with zsh ANSI wrapping" {
+test "integration: harness: default prompt with zsh ANSI wrapping" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -581,7 +670,7 @@ test "harness: default prompt with zsh ANSI wrapping" {
     try Harness.expectAnsi(out, .zsh);
 }
 
-test "harness: error status shows error symbol" {
+test "integration: harness: error status shows error symbol" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -598,7 +687,7 @@ test "harness: error status shows error symbol" {
     try Harness.expectContains(out, "ERR");
 }
 
-test "harness: custom config format isolates single module" {
+test "integration: harness: custom config format isolates single module" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -615,7 +704,7 @@ test "harness: custom config format isolates single module" {
     try Harness.expectNotEmpty(out);
 }
 
-test "harness: git branch detection in real repo" {
+test "integration: harness: git branch detection in real repo" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -630,7 +719,7 @@ test "harness: git branch detection in real repo" {
     try Harness.expectContains(out, "feature-amazing");
 }
 
-test "harness: git branch with ANSI validation across shells" {
+test "integration: harness: git branch with ANSI validation across shells" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -655,7 +744,7 @@ test "harness: git branch with ANSI validation across shells" {
     try Harness.expectAnsi(fish_out, .fish);
 }
 
-test "harness: git dirty status with modified file" {
+test "integration: harness: git dirty status with modified file" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -672,7 +761,7 @@ test "harness: git dirty status with modified file" {
     try Harness.expectContains(out, "?");
 }
 
-test "harness: cmd_duration appears above threshold" {
+test "integration: harness: cmd_duration appears above threshold" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -689,7 +778,7 @@ test "harness: cmd_duration appears above threshold" {
     try Harness.expectContains(out, "5s");
 }
 
-test "harness: cmd_duration hidden below threshold" {
+test "integration: harness: cmd_duration hidden below threshold" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -707,7 +796,7 @@ test "harness: cmd_duration hidden below threshold" {
     try testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "harness: full prompt with all modules" {
+test "integration: harness: full prompt with all modules" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -727,7 +816,7 @@ test "harness: full prompt with all modules" {
     try Harness.expectContains(out, "3s");
 }
 
-test "harness: collectAllShells validates every shell" {
+test "integration: harness: collectAllShells validates every shell" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -741,7 +830,7 @@ test "harness: collectAllShells validates every shell" {
     try Harness.expectNotEmpty(out);
 }
 
-test "harness: empty format produces empty prompt" {
+test "integration: harness: empty format produces empty prompt" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -754,7 +843,7 @@ test "harness: empty format produces empty prompt" {
     try testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "harness: invalid toml config falls back safely without crashing" {
+test "integration: harness: invalid toml config falls back safely without crashing" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
@@ -766,7 +855,7 @@ test "harness: invalid toml config falls back safely without crashing" {
     try Harness.expectNotEmpty(out);
 }
 
-test "harness: deep nested path does not crash" {
+test "integration: harness: deep nested path does not crash" {
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 

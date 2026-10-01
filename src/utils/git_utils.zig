@@ -28,7 +28,7 @@ pub const parseGitStatusPorcelainV2 = git.parseGitStatusPorcelainV2;
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
 
-test "test process.spawn" {
+test "unit: test process.spawn" {
     const io = std.testing.io;
     var child = try std.process.spawn(io, .{
         .argv = &[_][]const u8{ "git", "status", "--porcelain=v2", "--branch", "--show-stash" },
@@ -45,7 +45,7 @@ test "test process.spawn" {
     try std.testing.expect(info.hasAnyStatus() or !info.hasAnyStatus()); // just verify it doesn't crash
 }
 
-test "parseHeadContent on regular branch" {
+test "unit: parseHeadContent on regular branch" {
     const raw = "ref: refs/heads/main\n";
     try std.testing.expectEqualStrings("main", parseHeadContent(raw).?);
 
@@ -53,17 +53,17 @@ test "parseHeadContent on regular branch" {
     try std.testing.expectEqualStrings("feature/auth-v2", parseHeadContent(nested).?);
 }
 
-test "parseHeadContent on detached HEAD SHA-1" {
+test "unit: parseHeadContent on detached HEAD SHA-1" {
     const raw = "4cd65cc6c714604db0f7a6f6df0b6b66a7620ce0\n";
     try std.testing.expectEqualStrings("4cd65cc", parseHeadContent(raw).?);
 }
 
-test "parseGitDirPointer worktree" {
+test "unit: parseGitDirPointer worktree" {
     const raw = "gitdir: /home/user/project/.git/worktrees/feat\n";
     try std.testing.expectEqualStrings("/home/user/project/.git/worktrees/feat", parseGitDirPointer(raw).?);
 }
 
-test "GitStatusInfo hasAnyStatus" {
+test "unit: GitStatusInfo hasAnyStatus" {
     var info = GitStatusInfo{};
     try std.testing.expectEqual(false, info.hasAnyStatus());
 
@@ -71,7 +71,7 @@ test "GitStatusInfo hasAnyStatus" {
     try std.testing.expectEqual(true, info.hasAnyStatus());
 }
 
-test "parseGitStatusPorcelainV2 parses branch and changed files" {
+test "unit: parseGitStatusPorcelainV2 parses branch and changed files" {
     const output =
         \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
         \\# branch.head main
@@ -94,7 +94,7 @@ test "parseGitStatusPorcelainV2 parses branch and changed files" {
     try std.testing.expect(info.hasAnyStatus());
 }
 
-test "GitStatusInfo all flags verified" {
+test "unit: GitStatusInfo all flags verified" {
     var info = GitStatusInfo{
         .staged = true,
         .modified = true,
@@ -118,7 +118,7 @@ test "GitStatusInfo all flags verified" {
     try std.testing.expectEqual(@as(usize, 1), info.behind);
 }
 
-test "parseGitStatusPorcelainV2 with stash and renames" {
+test "unit: parseGitStatusPorcelainV2 with stash and renames" {
     const output =
         \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
         \\# branch.head main
@@ -139,7 +139,7 @@ test "parseGitStatusPorcelainV2 with stash and renames" {
     try std.testing.expect(info.untracked);
 }
 
-test "getGitStatus live repo execution" {
+test "unit: getGitStatus live repo execution" {
     const io = std.testing.io;
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd_len = try std.process.currentPath(io, &cwd_buf);

@@ -87,7 +87,7 @@ pub fn render(
     });
 }
 
-test "formatDurationBuf various ranges" {
+test "unit: formatDurationBuf various ranges" {
     var buf: [64]u8 = undefined;
 
     // Subsecond

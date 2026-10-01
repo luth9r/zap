@@ -17,7 +17,7 @@ pub fn loadConfigFile(
     EnvAdapter.map_ptr = environ_map;
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const config_path = resolveConfigPathBuf(&path_buf, EnvAdapter.get) orelse return;
+    const config_path = resolveExistingConfigPath(io, &path_buf, EnvAdapter.get) orelse return;
 
     const file = if (std.fs.path.isAbsolute(config_path))
         std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return
@@ -51,7 +51,7 @@ fn unquoteValue(val: []const u8) []const u8 {
 }
 
 /// Extracts a multiline string enclosed in triple quotes (""" or ''').
-fn extractMultilineValue(val: []const u8, content: []const u8, line_it: *std.mem.SplitIterator(u8, .scalar)) []const u8 {
+pub fn extractMultilineValue(val: []const u8, content: []const u8, line_it: *std.mem.SplitIterator(u8, .scalar)) []const u8 {
     const quote_type = val[0..3];
     var multiline_slice = val[3..];
     if (multiline_slice.len >= 3 and std.mem.endsWith(u8, multiline_slice, quote_type)) {
@@ -179,29 +179,83 @@ pub fn resolveConfigPathBuf(
         return custom;
     }
 
-    // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/config.toml)
+    // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/zap.toml)
     if (lookup_env("XDG_CONFIG_HOME")) |xdg| {
-        return std.fmt.bufPrint(buf, "{s}/zap/config.toml", .{xdg}) catch null;
+        return std.fmt.bufPrint(buf, "{s}/zap/zap.toml", .{xdg}) catch null;
     }
 
-    // Windows-specific configuration path support (%APPDATA%\zap\config.toml)
+    // Windows-specific configuration path support (%APPDATA%\zap\zap.toml)
     if (builtin.os.tag == .windows) {
         if (lookup_env("APPDATA")) |appdata| {
-            return std.fmt.bufPrint(buf, "{s}\\zap\\config.toml", .{appdata}) catch null;
+            return std.fmt.bufPrint(buf, "{s}\\zap\\zap.toml", .{appdata}) catch null;
         }
     }
 
-    // Universal fallback (~/.config/zap/config.toml)
+    // Universal fallback (~/.config/zap/zap.toml)
     const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
     if (lookup_env(home_env)) |home| {
         const sep = if (builtin.os.tag == .windows) "\\" else "/";
-        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}config.toml", .{ home, sep, sep, sep }) catch null;
+        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}zap.toml", .{ home, sep, sep, sep }) catch null;
     }
 
     return null;
 }
 
-test "parse empty string preserves default config" {
+pub fn resolveExistingConfigPath(
+    io: std.Io,
+    buf: *[std.fs.max_path_bytes]u8,
+    lookup_env: *const fn ([]const u8) ?[]const u8,
+) ?[]const u8 {
+    if (lookup_env("ZAP_CONFIG")) |custom| {
+        return custom;
+    }
+
+    const candidates = [_][]const u8{ "zap.toml", "config.toml" };
+
+    if (lookup_env("XDG_CONFIG_HOME")) |xdg| {
+        for (candidates) |filename| {
+            if (std.fmt.bufPrint(buf, "{s}/zap/{s}", .{ xdg, filename })) |candidate| {
+                if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
+                    var file = f;
+                    file.close(io);
+                    return candidate;
+                } else |_| {}
+            } else |_| {}
+        }
+    }
+
+    if (builtin.os.tag == .windows) {
+        if (lookup_env("APPDATA")) |appdata| {
+            for (candidates) |filename| {
+                if (std.fmt.bufPrint(buf, "{s}\\zap\\{s}", .{ appdata, filename })) |candidate| {
+                    if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
+                        var file = f;
+                        file.close(io);
+                        return candidate;
+                    } else |_| {}
+                } else |_| {}
+            }
+        }
+    }
+
+    const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+    if (lookup_env(home_env)) |home| {
+        const sep = if (builtin.os.tag == .windows) "\\" else "/";
+        for (candidates) |filename| {
+            if (std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}{s}", .{ home, sep, sep, sep, filename })) |candidate| {
+                if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
+                    var file = f;
+                    file.close(io);
+                    return candidate;
+                } else |_| {}
+            } else |_| {}
+        }
+    }
+
+    return resolveConfigPathBuf(buf, lookup_env);
+}
+
+test "unit: parse empty string preserves default config" {
     var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, "");
 
@@ -210,7 +264,7 @@ test "parse empty string preserves default config" {
     try std.testing.expectEqual(true, cfg.add_newline);
 }
 
-test "parse comments, sections and values" {
+test "unit: parse comments, sections and values" {
     const toml_text =
         \\# Configuration comment
         \\add_newline = false
@@ -244,7 +298,7 @@ test "parse comments, sections and values" {
     try std.testing.expectEqualStrings("[X](bold red)", cfg.character.error_symbol);
 }
 
-test "parse git_branch and git_status sections" {
+test "unit: parse git_branch and git_status sections" {
     const toml_text =
         \\[git_branch]
         \\symbol = "󰘬 "
@@ -277,7 +331,7 @@ test "parse git_branch and git_status sections" {
     try std.testing.expectEqual(false, cfg.git_status.disabled);
 }
 
-test "parse git_commit and git_state sections" {
+test "unit: parse git_commit and git_state sections" {
     const toml_text =
         \\[git_commit]
         \\style = "bold green"
@@ -308,7 +362,7 @@ test "parse git_commit and git_state sections" {
     try std.testing.expectEqual(false, cfg.git_state.disabled);
 }
 
-test "parse multiline format strings with triple quotes" {
+test "unit: parse multiline format strings with triple quotes" {
     const multiline_config =
         \\format = """
         \\┌─ $directory
@@ -326,7 +380,7 @@ test "parse multiline format strings with triple quotes" {
     try std.testing.expectEqualStrings("bold cyan", cfg.directory.style);
 }
 
-test "parseToml ignores $schema root key" {
+test "unit: parseToml ignores $schema root key" {
     const toml_with_schema =
         \\"$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"
         \\
@@ -340,7 +394,7 @@ test "parseToml ignores $schema root key" {
     try std.testing.expectEqualStrings("[»](bold cyan)", cfg.character.success_symbol);
 }
 
-test "resolveConfigPathBuf respects ZAP_CONFIG priority" {
+test "unit: resolveConfigPathBuf respects ZAP_CONFIG priority" {
     const mockEnv = struct {
         fn get(key: []const u8) ?[]const u8 {
             if (std.mem.eql(u8, key, "ZAP_CONFIG")) return "/custom/zap.toml";
@@ -354,7 +408,7 @@ test "resolveConfigPathBuf respects ZAP_CONFIG priority" {
     try std.testing.expectEqualStrings("/custom/zap.toml", path);
 }
 
-test "resolveConfigPathBuf resolves XDG_CONFIG_HOME" {
+test "unit: resolveConfigPathBuf resolves XDG_CONFIG_HOME" {
     const mockEnv = struct {
         fn get(key: []const u8) ?[]const u8 {
             if (std.mem.eql(u8, key, "XDG_CONFIG_HOME")) return "/home/test/.custom_config";
@@ -364,10 +418,10 @@ test "resolveConfigPathBuf resolves XDG_CONFIG_HOME" {
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = resolveConfigPathBuf(&buf, mockEnv).?;
-    try std.testing.expectEqualStrings("/home/test/.custom_config/zap/config.toml", path);
+    try std.testing.expectEqualStrings("/home/test/.custom_config/zap/zap.toml", path);
 }
 
-test "resolveConfigPathBuf falls back to HOME/.config/zap/config.toml" {
+test "unit: resolveConfigPathBuf falls back to HOME/.config/zap/zap.toml" {
     const mockEnv = struct {
         fn get(key: []const u8) ?[]const u8 {
             if (std.mem.eql(u8, key, "HOME")) return "/home/user";
@@ -377,10 +431,10 @@ test "resolveConfigPathBuf falls back to HOME/.config/zap/config.toml" {
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = resolveConfigPathBuf(&buf, mockEnv).?;
-    try std.testing.expectEqualStrings("/home/user/.config/zap/config.toml", path);
+    try std.testing.expectEqualStrings("/home/user/.config/zap/zap.toml", path);
 }
 
-test "parse os section" {
+test "unit: parse os section" {
     const toml_text =
         \\[os]
         \\disabled = false
@@ -395,3 +449,4 @@ test "parse os section" {
     try std.testing.expectEqualStrings("bold yellow", cfg.os.style);
     try std.testing.expectEqualStrings("", cfg.os.symbol);
 }
+

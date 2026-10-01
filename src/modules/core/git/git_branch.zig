@@ -74,7 +74,7 @@ pub fn render(
 
 pub const Harness = @import("../../../tests/harness.zig").Harness;
 
-test "truncateBranch below and above max_len" {
+test "unit: truncateBranch below and above max_len" {
     var buf: [64]u8 = undefined;
 
     // Disabled (max_len = 0)

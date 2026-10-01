@@ -24,12 +24,22 @@ pub const BufferWriter = struct {
         self.pos.* += copy_len;
     }
 
+    pub fn print(self: BufferWriter, comptime fmt: []const u8, args: anytype) !void {
+        if (self.pos.* >= self.buf.len) return;
+        const slice = self.buf[self.pos.*..];
+        const res = std.fmt.bufPrint(slice, fmt, args) catch {
+            self.pos.* = self.buf.len;
+            return;
+        };
+        self.pos.* += res.len;
+    }
+
     pub fn written(self: BufferWriter) []const u8 {
         return self.buf[0..self.pos.*];
     }
 };
 
-test "BufferWriter writes bytes and slices up to capacity" {
+test "unit: BufferWriter writes bytes and slices up to capacity" {
     var memory: [16]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&memory, &pos);
