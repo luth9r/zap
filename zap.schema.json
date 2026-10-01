@@ -369,6 +369,38 @@
           "description": "Custom OS symbol override. If omitted or empty, automatically detected based on the current OS/distribution."
         }
       }
+    },
+    "zig_lang": {
+      "type": "object",
+      "description": "Zig language indicator",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "[$symbol$version]($style) ",
+          "description": "Format template for the zig_lang module"
+        },
+        "symbol": {
+          "type": "string",
+          "default": "↯ ",
+          "description": "Symbol preceding the zig version indicator"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold yellow",
+          "description": "Style string for the zig indicator"
+        },
+        "version": {
+          "type": "string",
+          "default": "",
+          "description": "Version string to display"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the zig_lang module"
+        }
+      }
     }
   },
   "definitions": {

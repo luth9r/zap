@@ -1,10 +1,20 @@
 const std = @import("std");
 const testing = std.testing;
-const Config = @import("../config/config.zig").Config;
+const config_mod = @import("../config/config.zig");
 const formatter = @import("formatter.zig");
+const module_interface = @import("../modules/module.zig");
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 pub const PromptContext = @import("context.zig").PromptContext;
 pub const modules = @import("../modules/registry.zig");
+pub const ModuleVar = std.meta.DeclEnum(modules);
+
+comptime {
+    const decls = @typeInfo(modules).@"struct".decls;
+    for (decls) |decl| {
+        const mod = @field(modules, decl.name);
+        module_interface.validateModule(mod);
+    }
+}
 
 /// Computes a bitmask of active modules in a single pass over the format string.
 pub fn computeActiveModulesMask(format: []const u8) u16 {
@@ -33,14 +43,14 @@ pub fn computeActiveModulesMask(format: []const u8) u16 {
 }
 
 /// Orchestrates rendering the complete prompt across all active modules using comptime reflection.
-pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
+pub fn render(writer: anytype, config: config_mod.Config, ctx: PromptContext) !void {
     if (config.add_newline) {
         try writer.writeByte('\n');
     }
 
     const active_mask = computeActiveModulesMask(config.format);
     const decls = @typeInfo(modules).@"struct".decls;
-    var vars: [decls.len]formatter.Variable = undefined;
+    var vars: [decls.len]formatter.Variable(ModuleVar) = undefined;
 
     // Fast Git repo resolution: if any git-dependent module is active and git_dir is not yet supplied,
     // discover it once on the stack frame and pass it down.
@@ -83,12 +93,12 @@ pub fn render(writer: anytype, config: Config, ctx: PromptContext) !void {
         }
 
         vars[i] = .{
-            .name = decl.name,
+            .name = @field(ModuleVar, decl.name),
             .value = buf[0..pos],
         };
     }
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(ModuleVar){
         .vars = &vars,
         .shell = ctx.shell,
     });
@@ -98,7 +108,7 @@ test "render prompt with default configuration" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false; // Disable leading newline for exact prefix test
     const ctx = PromptContext{
         .cwd = "/home/user/projects/zap",
@@ -116,7 +126,7 @@ test "render prompt with error status and custom symbols" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.character.error_symbol = "[✗](bold red)";
 
     const ctx = PromptContext{
@@ -135,7 +145,7 @@ test "render prompt with disabled module" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.directory.disabled = true;
 
@@ -155,7 +165,7 @@ test "render prompt with custom root format" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.format = "in $directory\n$character";
     cfg.directory.style = "cyan";
@@ -177,7 +187,7 @@ test "render multiline prompt with colored frame symbols" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.format = "[┌─](bold yellow) $directory\n[└─](bold yellow)$character";
     cfg.directory.style = "bold cyan";
@@ -199,7 +209,7 @@ test "render prompt with cmd_duration module" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.format = "$directory$cmd_duration$character";
 
@@ -233,16 +243,16 @@ test "render prompt with git_status module variables" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.format = "$directory$git_branch$git_status$character";
 
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .vars = &[_]formatter.Variable{
-            .{ .name = "directory", .value = "\x1b[1;36m~/zap\x1b[0m " },
-            .{ .name = "git_branch", .value = "on \x1b[1;35mmain\x1b[0m " },
-            .{ .name = "git_status", .value = "\x1b[1;31m[!+]\x1b[0m " },
-            .{ .name = "character", .value = "\x1b[1;32m❯\x1b[0m " },
+    try formatter.formatTemplateWriter(writer, cfg.format, formatter.FormatContext(ModuleVar){
+        .vars = &[_]formatter.Variable(ModuleVar){
+            .{ .name = .directory, .value = "\x1b[1;36m~/zap\x1b[0m " },
+            .{ .name = .git_branch, .value = "on \x1b[1;35mmain\x1b[0m " },
+            .{ .name = .git_status, .value = "\x1b[1;31m[!+]\x1b[0m " },
+            .{ .name = .character, .value = "\x1b[1;32m❯\x1b[0m " },
         },
     });
 
@@ -254,18 +264,18 @@ test "render prompt with all git modules in root format" {
     var buf: [1024]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     cfg.add_newline = false;
     cfg.format = "$directory$git_branch$git_commit$git_state$git_status$character";
 
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .vars = &[_]formatter.Variable{
-            .{ .name = "directory", .value = "\x1b[1;36m~/zap\x1b[0m " },
-            .{ .name = "git_branch", .value = "on \x1b[1;35mmain\x1b[0m " },
-            .{ .name = "git_commit", .value = "\x1b[1;32m(4cd65cc)\x1b[0m " },
-            .{ .name = "git_state", .value = "(\x1b[1;33mREBASING 1/3\x1b[0m) " },
-            .{ .name = "git_status", .value = "\x1b[1;31m[!+]\x1b[0m " },
-            .{ .name = "character", .value = "\x1b[1;32m❯\x1b[0m " },
+    try formatter.formatTemplateWriter(writer, cfg.format, formatter.FormatContext(ModuleVar){
+        .vars = &[_]formatter.Variable(ModuleVar){
+            .{ .name = .directory, .value = "\x1b[1;36m~/zap\x1b[0m " },
+            .{ .name = .git_branch, .value = "on \x1b[1;35mmain\x1b[0m " },
+            .{ .name = .git_commit, .value = "\x1b[1;32m(4cd65cc)\x1b[0m " },
+            .{ .name = .git_state, .value = "(\x1b[1;33mREBASING 1/3\x1b[0m) " },
+            .{ .name = .git_status, .value = "\x1b[1;31m[!+]\x1b[0m " },
+            .{ .name = .character, .value = "\x1b[1;32m❯\x1b[0m " },
         },
     });
 
@@ -284,4 +294,3 @@ test "computeActiveModulesMask bitmask calculation" {
     const mask_none = computeActiveModulesMask("plain text without modules");
     try testing.expectEqual(@as(u16, 0), mask_none);
 }
-

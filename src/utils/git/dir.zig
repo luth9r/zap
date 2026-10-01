@@ -53,3 +53,44 @@ pub fn findGitDir(
 
     return null;
 }
+
+/// Locates the repository root directory by searching the current directory and its ancestors for .git.
+pub fn findRepoRoot(
+    io: std.Io,
+    cwd: []const u8,
+    out_buf: *[std.fs.max_path_bytes]u8,
+) ?[]const u8 {
+    var current: []const u8 = cwd;
+
+    while (current.len > 0) {
+        var git_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const git_path = std.fmt.bufPrint(&git_path_buf, "{s}/.git", .{current}) catch return null;
+
+        // Check if .git is a directory
+        if (std.Io.Dir.openDirAbsolute(io, git_path, .{})) |dir| {
+            var d = dir;
+            d.close(io);
+            return std.fmt.bufPrint(out_buf, "{s}", .{current}) catch null;
+        } else |_| {
+            // Check if .git is a worktree / submodule pointer file
+            if (std.Io.Dir.openFileAbsolute(io, git_path, .{})) |file| {
+                file.close(io);
+                return std.fmt.bufPrint(out_buf, "{s}", .{current}) catch null;
+            } else |_| {}
+        }
+
+        const parent = std.fs.path.dirname(current) orelse break;
+        if (std.mem.eql(u8, parent, current)) break;
+        current = parent;
+    }
+
+    return null;
+}
+
+test "unit: parseGitDirPointer parses valid and invalid pointers" {
+    try std.testing.expectEqualStrings(
+        "/path/to/.git/worktrees/wt",
+        parseGitDirPointer("gitdir: /path/to/.git/worktrees/wt\n").?,
+    );
+    try std.testing.expect(parseGitDirPointer("not a gitdir pointer") == null);
+}

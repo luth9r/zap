@@ -10,6 +10,7 @@ pub const GitStateType = git.GitStateType;
 pub const GitStateResult = git.GitStateResult;
 
 pub const findGitDir = git.findGitDir;
+pub const findRepoRoot = git.findRepoRoot;
 pub const parseGitDirPointer = git.parseGitDirPointer;
 pub const fileExists = git.fileExists;
 pub const anySubpathExists = git.anySubpathExists;

@@ -1,8 +1,9 @@
-pub const directory = @import("directory.zig");
-pub const git_branch = @import("git_branch.zig");
-pub const git_commit = @import("git_commit.zig");
-pub const git_state = @import("git_state.zig");
-pub const git_status = @import("git_status.zig");
-pub const cmd_duration = @import("cmd_duration.zig");
-pub const character = @import("character.zig");
-pub const os = @import("os.zig");
+pub const directory = @import("core/directory.zig");
+pub const git_branch = @import("core/git/git_branch.zig");
+pub const git_commit = @import("core/git/git_commit.zig");
+pub const git_state = @import("core/git/git_state.zig");
+pub const git_status = @import("core/git/git_status.zig");
+pub const cmd_duration = @import("core/cmd_duration.zig");
+pub const character = @import("core/character.zig");
+pub const os = @import("core/os.zig");
+pub const zig_lang = @import("languages/zig.zig");

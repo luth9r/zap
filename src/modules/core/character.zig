@@ -1,9 +1,10 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
-const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+const formatter = @import("../../engine/formatter.zig");
+const BufferWriter = @import("../../utils/buffer_writer.zig").BufferWriter;
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+
+pub const Var = enum { symbol };
 
 pub const CharacterConfig = struct {
     // Format string used to render the character module.
@@ -15,6 +16,8 @@ pub const CharacterConfig = struct {
     // Whether the character module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = CharacterConfig;
 
 /// Renders the prompt character module based on exit status code.
 pub fn render(
@@ -31,19 +34,19 @@ pub fn render(
     var symbol_pos: usize = 0;
 
     const sym_writer = BufferWriter.init(&symbol_buf, &symbol_pos);
-    try formatter.formatTemplateWriter(sym_writer, symbol_template, .{ .shell = ctx.shell });
+    try formatter.formatTemplateWriter(sym_writer, symbol_template, formatter.EmptyContext{ .shell = ctx.shell });
 
     const rendered_symbol = symbol_buf[0..symbol_pos];
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = rendered_symbol },
+        .vars = &.{
+            .{ .name = .symbol, .value = rendered_symbol },
         },
     });
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: character default success exit code" {
     var h = try Harness.create(std.testing.allocator);

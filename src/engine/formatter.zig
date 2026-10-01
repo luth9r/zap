@@ -2,35 +2,44 @@ const std = @import("std");
 const testing = std.testing;
 const style_mod = @import("style.zig");
 
-pub const Variable = struct {
-    name: []const u8,
-    value: []const u8,
-};
+pub fn Variable(comptime EnumType: type) type {
+    return struct {
+        name: EnumType,
+        value: []const u8,
+    };
+}
 
 pub const Shell = @import("../init/root.zig").Shell;
 
-/// Holds variable bindings and styling options for template expansion.
-pub const FormatContext = struct {
-    /// Array of key-value pairs available for expansion (e.g. `$path`, `$symbol`).
-    vars: []const Variable = &.{},
-    /// Default style used when `$style` is referenced within a format group.
-    style: []const u8 = "",
-    /// Shell target for zero-width escape wrapping.
-    shell: Shell = .generic,
+pub const EmptyVar = enum {};
+pub const EmptyContext = FormatContext(EmptyVar);
 
-    /// Looks up a variable by its name. Checks `$style` first, then searches `vars`.
-    pub fn get(self: FormatContext, name: []const u8) ?[]const u8 {
-        if (std.mem.eql(u8, name, "style")) {
-            if (self.style.len > 0) return self.style;
-        }
-        for (self.vars) |v| {
-            if (std.mem.eql(u8, v.name, name)) {
-                return v.value;
+/// Holds variable bindings and styling options for template expansion.
+pub fn FormatContext(comptime EnumType: type) type {
+    return struct {
+        /// Array of key-value pairs available for expansion (e.g. `$path`, `$symbol`).
+        vars: []const Variable(EnumType) = &.{},
+        /// Default style used when `$style` is referenced within a format group.
+        style: []const u8 = "",
+        /// Shell target for zero-width escape wrapping.
+        shell: Shell = .generic,
+
+        /// Looks up a variable by its name. Checks `$style` first, then searches `vars`.
+        pub fn get(self: @This(), name_str: []const u8) ?[]const u8 {
+            if (std.mem.eql(u8, name_str, "style")) {
+                if (self.style.len > 0) return self.style;
+                return null;
             }
+            const name = std.meta.stringToEnum(EnumType, name_str) orelse return null;
+            for (self.vars) |v| {
+                if (v.name == name) {
+                    return v.value;
+                }
+            }
+            return null;
         }
-        return null;
-    }
-};
+    };
+}
 
 /// Formats a style template string using the provided variable context.
 ///
@@ -44,7 +53,7 @@ pub const FormatContext = struct {
 pub fn formatTemplateWriter(
     writer: anytype,
     template: []const u8,
-    ctx: FormatContext,
+    ctx: anytype,
 ) !void {
     var i: usize = 0;
     while (i < template.len) {
@@ -97,7 +106,7 @@ pub fn formatTemplateWriter(
 pub fn formatTemplate(
     allocator: std.mem.Allocator,
     template: []const u8,
-    ctx: FormatContext,
+    ctx: anytype,
 ) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -195,7 +204,7 @@ fn renderStyledGroup(
     writer: anytype,
     content_raw: []const u8,
     style_spec: []const u8,
-    ctx: FormatContext,
+    ctx: anytype,
 ) !void {
     if (isGroupContentEmpty(content_raw, ctx)) return;
 
@@ -242,7 +251,7 @@ pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !
     }
 }
 
-fn isGroupContentEmpty(raw: []const u8, ctx: FormatContext) bool {
+fn isGroupContentEmpty(raw: []const u8, ctx: anytype) bool {
     var i: usize = 0;
     while (i < raw.len) {
         if (raw[i] == '\\' and i + 1 < raw.len) {
@@ -273,7 +282,7 @@ fn isGroupContentEmpty(raw: []const u8, ctx: FormatContext) bool {
 fn renderGroupContent(
     writer: anytype,
     raw: []const u8,
-    ctx: FormatContext,
+    ctx: anytype,
 ) !void {
     var i: usize = 0;
     while (i < raw.len) {
@@ -319,7 +328,7 @@ fn renderGroupContent(
     }
 }
 
-fn shouldRenderConditionalGroup(inner: []const u8, ctx: FormatContext) bool {
+fn shouldRenderConditionalGroup(inner: []const u8, ctx: anytype) bool {
     var has_var = false;
     var all_vars_empty = true;
     var i: usize = 0;
@@ -406,9 +415,10 @@ fn extractVarName(slice: []const u8) []const u8 {
     return slice[0..len];
 }
 
+const TestVar = enum { user, host, price, symbol, duration, path, missing, text, version };
 test "plain text template" {
     const a = testing.allocator;
-    const ctx = FormatContext{};
+    const ctx = FormatContext(TestVar){};
 
     const res = try formatTemplate(a, "hello world", ctx);
     defer a.free(res);
@@ -418,10 +428,10 @@ test "plain text template" {
 
 test "variable expansion outside styled groups" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "user", .value = "luther" },
-            .{ .name = "host", .value = "nixos" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .user, .value = "luther" },
+            .{ .name = .host, .value = "nixos" },
         },
     };
 
@@ -433,9 +443,9 @@ test "variable expansion outside styled groups" {
 
 test "escaped characters" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "price", .value = "100" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .price, .value = "100" },
         },
     };
 
@@ -447,9 +457,9 @@ test "escaped characters" {
 
 test "styled group with explicit style" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "symbol", .value = "➜" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .symbol, .value = "➜" },
         },
     };
 
@@ -461,10 +471,10 @@ test "styled group with explicit style" {
 
 test "styled group with $style context" {
     const a = testing.allocator;
-    const ctx = FormatContext{
+    const ctx = FormatContext(TestVar){
         .style = "bold yellow",
-        .vars = &[_]Variable{
-            .{ .name = "duration", .value = "2s" },
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .duration, .value = "2s" },
         },
     };
 
@@ -476,9 +486,9 @@ test "styled group with $style context" {
 
 test "advanced style strings inside format" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "path", .value = "~/projects/zap" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .path, .value = "~/projects/zap" },
         },
     };
 
@@ -492,11 +502,11 @@ test "conditional group inside styled bracket" {
     const a = testing.allocator;
 
     // Case 1: version is empty -> ($version ) should be skipped
-    const ctx1 = FormatContext{
+    const ctx1 = FormatContext(TestVar){
         .style = "bold green",
-        .vars = &[_]Variable{
-            .{ .name = "symbol", .value = "➜" },
-            .{ .name = "version", .value = "" },
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .symbol, .value = "➜" },
+            .{ .name = .version, .value = "" },
         },
     };
 
@@ -505,11 +515,11 @@ test "conditional group inside styled bracket" {
     try testing.expectEqualStrings("\x1b[1;32m➜\x1b[0m", res1);
 
     // Case 2: version is present -> ($version ) should be included
-    const ctx2 = FormatContext{
+    const ctx2 = FormatContext(TestVar){
         .style = "bold green",
-        .vars = &[_]Variable{
-            .{ .name = "symbol", .value = "➜ " },
-            .{ .name = "version", .value = "v1.0" },
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .symbol, .value = "➜ " },
+            .{ .name = .version, .value = "v1.0" },
         },
     };
 
@@ -520,10 +530,10 @@ test "conditional group inside styled bracket" {
 
 test "empty group produces empty string" {
     const a = testing.allocator;
-    const ctx = FormatContext{
+    const ctx = FormatContext(TestVar){
         .style = "bold red",
-        .vars = &[_]Variable{
-            .{ .name = "missing", .value = "" },
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .missing, .value = "" },
         },
     };
 
@@ -534,10 +544,10 @@ test "empty group produces empty string" {
 
 test "multiple styled groups and consecutive blocks" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "path", .value = "~/zap" },
-            .{ .name = "symbol", .value = "➜" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .path, .value = "~/zap" },
+            .{ .name = .symbol, .value = "➜" },
         },
     };
 
@@ -549,9 +559,9 @@ test "multiple styled groups and consecutive blocks" {
 
 test "escaped brackets inside styled group" {
     const a = testing.allocator;
-    const ctx = FormatContext{
-        .vars = &[_]Variable{
-            .{ .name = "symbol", .value = "➜" },
+    const ctx = FormatContext(TestVar){
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .symbol, .value = "➜" },
         },
     };
 
@@ -563,7 +573,7 @@ test "escaped brackets inside styled group" {
 
 test "unmatched brackets handled as literal text" {
     const a = testing.allocator;
-    const ctx = FormatContext{};
+    const ctx = FormatContext(TestVar){};
 
     const res = try formatTemplate(a, "normal [text without style) and (parentheses)", ctx);
     defer a.free(res);
@@ -573,25 +583,25 @@ test "unmatched brackets handled as literal text" {
 
 test "shell zero-width escape wrapping" {
     const a = testing.allocator;
-    const ctx_bash = FormatContext{
+    const ctx_bash = FormatContext(TestVar){
         .shell = .bash,
-        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+        .vars = &[_]Variable(TestVar){.{ .name = .text, .value = "hi" }},
     };
     const res_bash = try formatTemplate(a, "[$text](bold green)", ctx_bash);
     defer a.free(res_bash);
     try testing.expectEqualStrings("\x01\x1b[1;32m\x02hi\x01\x1b[0m\x02", res_bash);
 
-    const ctx_zsh = FormatContext{
+    const ctx_zsh = FormatContext(TestVar){
         .shell = .zsh,
-        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+        .vars = &[_]Variable(TestVar){.{ .name = .text, .value = "hi" }},
     };
     const res_zsh = try formatTemplate(a, "[$text](bold green)", ctx_zsh);
     defer a.free(res_zsh);
     try testing.expectEqualStrings("%{\x1b[1;32m%}hi%{\x1b[0m%}", res_zsh);
 
-    const ctx_fish = FormatContext{
+    const ctx_fish = FormatContext(TestVar){
         .shell = .fish,
-        .vars = &[_]Variable{.{ .name = "text", .value = "hi" }},
+        .vars = &[_]Variable(TestVar){.{ .name = .text, .value = "hi" }},
     };
     const res_fish = try formatTemplate(a, "[$text](bold green)", ctx_fish);
     defer a.free(res_fish);

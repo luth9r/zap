@@ -1,11 +1,12 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
-const git_utils = @import("../utils/git_utils.zig");
+const formatter = @import("../../../engine/formatter.zig");
+const git_utils = @import("../../../utils/git_utils.zig");
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 
 pub const is_git_dependent: bool = true;
+
+pub const Var = enum { branch, remote_branch, symbol };
 
 pub const GitBranchConfig = struct {
     // Format template for the git_branch module.
@@ -21,6 +22,8 @@ pub const GitBranchConfig = struct {
     // Whether the git_branch module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = GitBranchConfig;
 
 /// Truncates a branch name if its length exceeds truncation_length.
 pub fn truncateBranch(
@@ -58,18 +61,18 @@ pub fn render(
         config.truncation_symbol,
     );
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = config.symbol },
-            .{ .name = "branch", .value = branch_str },
-            .{ .name = "remote_branch", .value = "" },
+        .vars = &.{
+            .{ .name = .symbol, .value = config.symbol },
+            .{ .name = .branch, .value = branch_str },
+            .{ .name = .remote_branch, .value = "" },
         },
     });
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "truncateBranch below and above max_len" {
     var buf: [64]u8 = undefined;
@@ -181,4 +184,3 @@ test "integration: git_branch in git worktree" {
     const out = try h.collectAllShells();
     try Harness.expectContains(out, "wt-branch");
 }
-

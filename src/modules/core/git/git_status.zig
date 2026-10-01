@@ -1,10 +1,11 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
-const git_utils = @import("../utils/git_utils.zig");
-const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+const formatter = @import("../../../engine/formatter.zig");
+const git_utils = @import("../../../utils/git_utils.zig");
+const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
+
+pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, renamed, ahead_behind };
 
 pub const GitStatusConfig = struct {
     // Format template for the git_status module.
@@ -36,6 +37,8 @@ pub const GitStatusConfig = struct {
     // Whether the git_status module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = GitStatusConfig;
 
 /// Formats combined all_status string into a buffer.
 pub fn formatAllStatus(
@@ -127,18 +130,18 @@ pub fn render(
     var ahead_behind_buf: [64]u8 = undefined;
     const ahead_behind_str = formatAheadBehind(&ahead_behind_buf, config, info.ahead, info.behind);
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "all_status", .value = all_status_str },
-            .{ .name = "ahead_behind", .value = ahead_behind_str },
-            .{ .name = "stashed", .value = if (info.stashed) config.stashed else "" },
-            .{ .name = "modified", .value = if (info.modified) config.modified else "" },
-            .{ .name = "staged", .value = if (info.staged) config.staged else "" },
-            .{ .name = "untracked", .value = if (info.untracked) config.untracked else "" },
-            .{ .name = "renamed", .value = if (info.renamed) config.renamed else "" },
-            .{ .name = "deleted", .value = if (info.deleted) config.deleted else "" },
+        .vars = &.{
+            .{ .name = .all_status, .value = all_status_str },
+            .{ .name = .ahead_behind, .value = ahead_behind_str },
+            .{ .name = .stashed, .value = if (info.stashed) config.stashed else "" },
+            .{ .name = .modified, .value = if (info.modified) config.modified else "" },
+            .{ .name = .staged, .value = if (info.staged) config.staged else "" },
+            .{ .name = .untracked, .value = if (info.untracked) config.untracked else "" },
+            .{ .name = .renamed, .value = if (info.renamed) config.renamed else "" },
+            .{ .name = .deleted, .value = if (info.deleted) config.deleted else "" },
         },
     });
 }
@@ -180,7 +183,7 @@ test "formatAllStatus with conflicted, deleted, and renamed flags" {
     try std.testing.expectEqualStrings("=$✘»!+?", status_str);
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_status renders nothing in clean repo" {
     var h = try Harness.create(std.testing.allocator);
@@ -204,20 +207,20 @@ test "integration: git_status with conflicted file shows =" {
     try h.writeFile("file.txt", "base");
     try h.git(&.{ "add", "." });
     try h.git(&.{ "commit", "-m", "base" });
-    
+
     // Create branch a and modify
     try h.git(&.{ "checkout", "-b", "a" });
     try h.writeFile("file.txt", "a\n");
     try h.git(&.{ "add", "." });
     try h.git(&.{ "commit", "-m", "a" });
-    
+
     // Create branch b and modify
     try h.git(&.{ "checkout", "master" });
     try h.git(&.{ "checkout", "-b", "b" });
     try h.writeFile("file.txt", "b\n");
     try h.git(&.{ "add", "." });
     try h.git(&.{ "commit", "-m", "b" });
-    
+
     // Merge a into b causing conflict
     _ = try h.gitAllowFail(&.{ "merge", "a" });
 
@@ -352,7 +355,7 @@ test "integration: git_status with stashed changes shows stash symbol" {
     try h.git(&.{ "add", "stash_target.txt" });
     try h.git(&.{ "commit", "-m", "add stash_target" });
     try h.writeFile("stash_target.txt", "v2");
-    try h.git(&.{ "stash" });
+    try h.git(&.{"stash"});
 
     try h.setConfig(
         \\format = "$git_status"

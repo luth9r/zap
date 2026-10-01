@@ -23,10 +23,10 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit and integration tests");
 
     const test_groups = [_][]const []const u8{
-        &.{"modules.git"},
-        &.{"modules.os"},
-        &.{"modules.directory"},
-        &.{ "modules.character", "modules.cmd_duration" },
+        &.{"modules.core.git"},
+        &.{"modules.core.os"},
+        &.{"modules.core.directory"},
+        &.{ "modules.core.character", "modules.core.cmd_duration", "modules.languages", "modules.module" },
         &.{ "tests.harness", "utils", "config", "engine", "init" },
     };
 

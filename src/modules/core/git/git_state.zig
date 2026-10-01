@@ -1,10 +1,12 @@
 const std = @import("std");
-const formatter = @import("../engine/formatter.zig");
-const git_utils = @import("../utils/git_utils.zig");
+const formatter = @import("../../../engine/formatter.zig");
+const git_utils = @import("../../../utils/git_utils.zig");
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 
 pub const is_git_dependent: bool = true;
+
+pub const Var = enum { progress_current, state, progress_total };
 
 pub const GitStateConfig = struct {
     // Format template for the git_state module.
@@ -28,6 +30,8 @@ pub const GitStateConfig = struct {
     // Whether the git_state module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = GitStateConfig;
 
 /// Renders the git_state module according to configuration.
 pub fn render(
@@ -56,18 +60,18 @@ pub fn render(
         .am_or_rebase => config.am_or_rebase,
     };
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "state", .value = state_label },
-            .{ .name = "progress_current", .value = state_res.progress_current },
-            .{ .name = "progress_total", .value = state_res.progress_total },
+        .vars = &.{
+            .{ .name = .state, .value = state_label },
+            .{ .name = .progress_current, .value = state_res.progress_current },
+            .{ .name = .progress_total, .value = state_res.progress_total },
         },
     });
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_state renders nothing in normal clean repo" {
     var h = try Harness.create(std.testing.allocator);

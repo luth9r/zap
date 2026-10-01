@@ -1,14 +1,15 @@
 const std = @import("std");
 const testing = std.testing;
 const builtin = @import("builtin");
-const formatter = @import("../engine/formatter.zig");
-const fs = @import("../utils/fs.zig");
+const formatter = @import("../../engine/formatter.zig");
+const fs = @import("../../utils/fs.zig");
 
-pub const Config = @import("../config/config.zig").Config;
-pub const Fixture = @import("../tests/fixture.zig").Fixture;
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
-pub const Shell = @import("../init/root.zig").Shell;
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Fixture = @import("../../tests/fixture.zig").Fixture;
+pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+pub const Shell = @import("../../init/root.zig").Shell;
+pub const Harness = @import("../../tests/harness.zig").Harness;
+
+pub const Var = enum { style, symbol };
 
 pub const OsConfig = struct {
     format: []const u8 = "[$symbol]($style) ",
@@ -17,6 +18,8 @@ pub const OsConfig = struct {
     symbol: []const u8 = "",
     disabled: bool = true,
 };
+
+pub const Config = OsConfig;
 pub const TargetOs = enum {
     windows,
     macos,
@@ -139,12 +142,12 @@ pub fn render(
         break :blk os_type.defaultSymbol();
     };
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = symbol },
-            .{ .name = "style", .value = config.style },
+        .vars = &.{
+            .{ .name = .symbol, .value = symbol },
+            .{ .name = .style, .value = config.style },
         },
     });
 }

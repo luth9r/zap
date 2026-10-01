@@ -2,26 +2,12 @@ const std = @import("std");
 
 pub const config_mod = @import("config/config.zig");
 pub const toml_parser = @import("config/toml_parser.zig");
-pub const style = @import("engine/style.zig");
-pub const formatter = @import("engine/formatter.zig");
 pub const prompt = @import("engine/prompt.zig");
-pub const directory = @import("modules/directory.zig");
-pub const character = @import("modules/character.zig");
-pub const cmd_duration = @import("modules/cmd_duration.zig");
-pub const git_branch = @import("modules/git_branch.zig");
-pub const git_commit = @import("modules/git_commit.zig");
-pub const git_state = @import("modules/git_state.zig");
-pub const git_status = @import("modules/git_status.zig");
-pub const os = @import("modules/os.zig");
-pub const registry = @import("modules/registry.zig");
 pub const context = @import("engine/context.zig");
-pub const buffer_writer = @import("utils/buffer_writer.zig");
-pub const path_utils = @import("utils/path_utils.zig");
-pub const git_utils = @import("utils/git_utils.zig");
 pub const init_mod = @import("init/root.zig");
 
 const Config = config_mod.Config;
-const BufferWriter = buffer_writer.BufferWriter;
+const BufferWriter = @import("utils/buffer_writer.zig").BufferWriter;
 
 pub const Command = union(enum) {
     init: struct {
@@ -47,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
             try std.Io.File.stdout().writeStreamingAll(init.io, script_buf[0..pos]);
         },
         .prompt => |prompt_args| {
-            var config = Config{};
+            var config: Config = config_mod.defaultConfig();
             var config_file_buf: [64 * 1024]u8 = undefined;
             toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
 

@@ -1,8 +1,9 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
+const formatter = @import("../../engine/formatter.zig");
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+
+pub const Var = enum { duration };
 
 pub const CmdDurationConfig = struct {
     // Minimum execution duration in milliseconds to trigger rendering.
@@ -16,6 +17,8 @@ pub const CmdDurationConfig = struct {
     // Whether the cmd_duration module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = CmdDurationConfig;
 
 /// Formats duration in milliseconds into a compact human-readable string buffer.
 pub fn formatDurationBuf(buf: []u8, duration_ms: u64, show_milliseconds: bool) ?[]const u8 {
@@ -75,11 +78,11 @@ pub fn render(
     var dur_buf: [64]u8 = undefined;
     const dur_str = formatDurationBuf(&dur_buf, ctx.cmd_duration, config.show_milliseconds) orelse return;
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "duration", .value = dur_str },
+        .vars = &.{
+            .{ .name = .duration, .value = dur_str },
         },
     });
 }
@@ -107,7 +110,7 @@ test "formatDurationBuf various ranges" {
     try std.testing.expectEqualStrings("1d 2h 3m 4s", formatDurationBuf(&buf, 93784000, false).?);
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: cmd_duration appears above min_time threshold" {
     var h = try Harness.create(std.testing.allocator);

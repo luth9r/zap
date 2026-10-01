@@ -1,11 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Config = @import("config.zig").Config;
+const config_mod = @import("config.zig");
 
 pub fn loadConfigFile(
     io: std.Io,
     environ_map: *const std.process.Environ.Map,
-    config: *Config,
+    config: *config_mod.Config,
     content_buf: []u8,
 ) void {
     const EnvAdapter = struct {
@@ -82,7 +82,7 @@ fn extractMultilineValue(val: []const u8, content: []const u8, line_it: *std.mem
 }
 
 /// Parses TOML content directly into Config without heap allocations using comptime reflection.
-pub fn parseToml(config: *Config, content: []const u8) void {
+pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
     var line_it = std.mem.splitScalar(u8, content, '\n');
     var current_section: ?[]const u8 = null;
 
@@ -155,9 +155,9 @@ fn applyGenericField(ptr: anytype, key: []const u8, val: []const u8) void {
     }
 }
 
-fn applyValue(config: *Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
+fn applyValue(config: *config_mod.Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
     if (section) |sec_name| {
-        inline for (@typeInfo(Config).@"struct".fields) |sec_field| {
+        inline for (@typeInfo(config_mod.Config).@"struct".fields) |sec_field| {
             if (std.mem.eql(u8, sec_field.name, sec_name)) {
                 if (@typeInfo(sec_field.type) == .@"struct") {
                     applyGenericField(&@field(config, sec_field.name), key, val);
@@ -202,7 +202,7 @@ pub fn resolveConfigPathBuf(
 }
 
 test "parse empty string preserves default config" {
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, "");
 
     try std.testing.expectEqualStrings("~", cfg.directory.home_symbol);
@@ -230,7 +230,7 @@ test "parse comments, sections and values" {
         \\error_symbol = "[X](bold red)"
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, toml_text);
 
     try std.testing.expectEqual(false, cfg.add_newline);
@@ -261,7 +261,7 @@ test "parse git_branch and git_status sections" {
         \\disabled = false
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, toml_text);
 
     try std.testing.expectEqualStrings("󰘬 ", cfg.git_branch.symbol);
@@ -293,7 +293,7 @@ test "parse git_commit and git_state sections" {
         \\disabled = false
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, toml_text);
 
     try std.testing.expectEqualStrings("bold green", cfg.git_commit.style);
@@ -318,7 +318,7 @@ test "parse multiline format strings with triple quotes" {
         \\style = "bold cyan"
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, multiline_config);
 
     const expected_format = "┌─ $directory\n└─ $character";
@@ -334,7 +334,7 @@ test "parseToml ignores $schema root key" {
         \\success_symbol = "[»](bold cyan)"
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, toml_with_schema);
 
     try std.testing.expectEqualStrings("[»](bold cyan)", cfg.character.success_symbol);
@@ -388,7 +388,7 @@ test "parse os section" {
         \\symbol = ""
     ;
 
-    var cfg = Config{};
+    var cfg: config_mod.Config = config_mod.defaultConfig();
     parseToml(&cfg, toml_text);
 
     try std.testing.expectEqual(false, cfg.os.disabled);

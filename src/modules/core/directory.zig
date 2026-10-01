@@ -1,11 +1,12 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
-const path_utils = @import("../utils/path_utils.zig");
+const formatter = @import("../../engine/formatter.zig");
+const path_utils = @import("../../utils/path_utils.zig");
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../engine/context.zig").PromptContext;
 
 pub const buffer_size: usize = std.fs.max_path_bytes + 256;
+
+pub const Var = enum { read_only_style, path, read_only };
 
 pub const DirectoryConfig = struct {
     // Format string used to render the directory module.
@@ -28,6 +29,8 @@ pub const DirectoryConfig = struct {
     disabled: bool = false,
 };
 
+pub const Config = DirectoryConfig;
+
 /// Renders the directory module according to the directory configuration.
 pub fn render(
     writer: anytype,
@@ -41,7 +44,7 @@ pub fn render(
 
     if (config.truncate_to_repo) {
         const git_dir_opt = ctx.git_dir orelse if (ctx.io) |io_val|
-            @import("../utils/git_utils.zig").findGitDir(io_val, ctx.cwd, &repo_root_buf)
+            @import("../../utils/git_utils.zig").findGitDir(io_val, ctx.cwd, &repo_root_buf)
         else
             null;
         if (git_dir_opt) |git_dir| {
@@ -74,18 +77,18 @@ pub fn render(
     }
     const read_only_val = if (is_read_only) config.read_only else "";
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "path", .value = path_str },
-            .{ .name = "read_only", .value = read_only_val },
-            .{ .name = "read_only_style", .value = config.read_only_style },
+        .vars = &.{
+            .{ .name = .path, .value = path_str },
+            .{ .name = .read_only, .value = read_only_val },
+            .{ .name = .read_only_style, .value = config.read_only_style },
         },
     });
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: directory default path renders home symbol" {
     var h = try Harness.create(std.testing.allocator);

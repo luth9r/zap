@@ -36,6 +36,7 @@ pub const GitStateResult = state.GitStateResult;
 
 // Re-export standalone utility functions
 pub const findGitDir = dir.findGitDir;
+pub const findRepoRoot = dir.findRepoRoot;
 pub const parseGitDirPointer = dir.parseGitDirPointer;
 pub const fileExists = fs.fileExists;
 pub const anySubpathExists = fs.anySubpathExists;

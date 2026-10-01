@@ -1,11 +1,12 @@
 const std = @import("std");
-const Config = @import("../config/config.zig").Config;
-const formatter = @import("../engine/formatter.zig");
-const git_utils = @import("../utils/git_utils.zig");
+const formatter = @import("../../../engine/formatter.zig");
+const git_utils = @import("../../../utils/git_utils.zig");
 
-pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 
 pub const is_git_dependent: bool = true;
+
+pub const Var = enum { hash, tag };
 
 pub const GitCommitConfig = struct {
     // Format template for the git_commit module.
@@ -23,6 +24,8 @@ pub const GitCommitConfig = struct {
     // Whether the git_commit module is disabled.
     disabled: bool = false,
 };
+
+pub const Config = GitCommitConfig;
 
 /// Renders the git_commit module according to configuration.
 pub fn render(
@@ -58,17 +61,17 @@ pub fn render(
         tag_str = std.fmt.bufPrint(&tag_buf, "{s}{s}", .{ config.tag_symbol, commit_info.tag }) catch "";
     }
 
-    try formatter.formatTemplateWriter(writer, config.format, .{
+    try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "hash", .value = short_hash },
-            .{ .name = "tag", .value = tag_str },
+        .vars = &.{
+            .{ .name = .hash, .value = short_hash },
+            .{ .name = .tag, .value = tag_str },
         },
     });
 }
 
-pub const Harness = @import("../tests/harness.zig").Harness;
+pub const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_commit hidden on normal branch by default" {
     var h = try Harness.create(std.testing.allocator);
@@ -122,15 +125,15 @@ test "integration: git_commit custom hash length" {
     );
 
     const out = try h.collectAllShells();
-    
+
     // Read the actual SHA from .git/HEAD
     var head_buf: [128]u8 = undefined;
     var path_buf: [1024]u8 = undefined;
-    const fs = @import("../utils/fs.zig");
+    const fs = @import("../../../utils/fs.zig");
     const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
     const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
     const sha = std.mem.trim(u8, head_content, " \r\n");
-    
+
     try Harness.expectVisibleText(out, sha[0..5]);
     try Harness.expectVisibleText(out, "(");
     try Harness.expectVisibleText(out, ")");
@@ -154,15 +157,15 @@ test "integration: git_commit full hash length (0)" {
     );
 
     const out = try h.collectAllShells();
-    
+
     // Read the actual SHA from .git/HEAD
     var head_buf: [128]u8 = undefined;
     var path_buf: [1024]u8 = undefined;
-    const fs = @import("../utils/fs.zig");
+    const fs = @import("../../../utils/fs.zig");
     const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
     const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
     const sha = std.mem.trim(u8, head_content, " \r\n");
-    
+
     try Harness.expectVisibleText(out, sha);
 }
 
