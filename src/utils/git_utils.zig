@@ -28,21 +28,21 @@ pub const parseGitStatusPorcelainV2 = git.parseGitStatusPorcelainV2;
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
 
-test "unit: test process.spawn" {
-    const io = std.testing.io;
-    var child = try std.process.spawn(io, .{
-        .argv = &[_][]const u8{ "git", "status", "--porcelain=v2", "--branch", "--show-stash" },
-        .stdout = .pipe,
-        .stderr = .ignore,
-        .stdin = .ignore,
-    });
-    var stream_buf: [512]u8 = undefined;
-    var reader = child.stdout.?.reader(io, &stream_buf);
-    var out_buf: [8192]u8 = undefined;
-    const bytes_read = reader.interface.readSliceShort(&out_buf) catch 0;
-    _ = child.wait(io) catch {};
-    const info = parseGitStatusPorcelainV2(out_buf[0..bytes_read]);
-    try std.testing.expect(info.hasAnyStatus() or !info.hasAnyStatus()); // just verify it doesn't crash
+test "unit: parseGitStatusPorcelainV2 with stash, deleted and renamed files" {
+    const output =
+        \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
+        \\# branch.head main
+        \\# stash 2
+        \\1 .D N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 deleted.txt
+        \\2 R. N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 R100 new.txt orig.txt
+        \\
+    ;
+
+    const info = parseGitStatusPorcelainV2(output);
+    try std.testing.expect(info.stashed);
+    try std.testing.expect(info.deleted);
+    try std.testing.expect(info.renamed);
+    try std.testing.expect(info.hasAnyStatus());
 }
 
 test "unit: parseHeadContent on regular branch" {

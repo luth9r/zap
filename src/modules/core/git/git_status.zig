@@ -430,3 +430,154 @@ test "integration: git_status diverged from tracking branch shows diverged symbo
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "⇕");
 }
+
+test "integration: git_status ignores files listed in .gitignore" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile(".gitignore", "config.toml\nignored_folder/\n*.log\n");
+    try h.git(&.{ "add", ".gitignore" });
+    try h.git(&.{ "commit", "-m", "add gitignore" });
+
+    // Create ignored files/folders and an untracked file
+    try h.writeFile("app.log", "some log text");
+    const ign_dir = try std.fmt.allocPrint(h.arena.allocator(), "{s}/ignored_folder", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "mkdir", "-p", ign_dir });
+    try h.writeFile("ignored_folder/cache.bin", "cached data");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    // Should render empty because only ignored files exist
+    const out_clean = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out_clean.len);
+
+    // Now create a real untracked file
+    try h.writeFile("real_untracked.txt", "untracked data");
+    const out_untracked = try h.collectAllShells();
+    try Harness.expectVisibleText(out_untracked, "?");
+}
+
+test "integration: git_status combined multiple flags simultaneously" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("staged.txt", "v1");
+    try h.writeFile("modified.txt", "v1");
+    try h.writeFile("stash.txt", "v1");
+    try h.writeFile("orig_renamed.txt", "v1");
+    try h.writeFile("to_delete.txt", "v1");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // 1. Set upstream and make an ahead commit (ahead: ⇡1)
+    try h.git(&.{ "branch", "upstream_branch" });
+    try h.git(&.{ "branch", "--set-upstream-to=upstream_branch", "master" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead_commit" });
+
+    // 2. Stash a change (stashed: $)
+    try h.writeFile("stash.txt", "v2");
+    try h.git(&.{"stash"});
+
+    // 3. Rename a file (renamed: »)
+    try h.git(&.{ "mv", "orig_renamed.txt", "renamed.txt" });
+
+    // 4. Delete a file (deleted: ✘)
+    try h.git(&.{ "rm", "to_delete.txt" });
+
+    // 5. Stage a file (staged: +)
+    try h.writeFile("staged.txt", "staged_v2");
+    try h.git(&.{ "add", "staged.txt" });
+
+    // 6. Modify an unstaged file (modified: !)
+    try h.writeFile("modified.txt", "modified_v2");
+
+    // 7. Untracked file (untracked: ?)
+    try h.writeFile("untracked.txt", "untracked_new");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "$"); // stashed
+    try Harness.expectVisibleText(out, "✘"); // deleted
+    try Harness.expectVisibleText(out, "»"); // renamed
+    try Harness.expectVisibleText(out, "!"); // modified
+    try Harness.expectVisibleText(out, "+"); // staged
+    try Harness.expectVisibleText(out, "?"); // untracked
+    try Harness.expectVisibleText(out, "⇡1"); // ahead
+}
+
+test "integration: git_status custom format with individual variable tokens" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("f1.txt", "v1");
+    try h.writeFile("f2.txt", "v1");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Stage f1 and modify f2
+    try h.writeFile("f1.txt", "v2");
+    try h.git(&.{ "add", "f1.txt" });
+    try h.writeFile("f2.txt", "v2");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+        \\
+        \\[git_status]
+        \\format = "staged:[$staged] modified:[$modified] "
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "staged:[+]");
+    try Harness.expectVisibleText(out, "modified:[!]");
+}
+
+test "integration: git_status conflicted and diverged with custom symbols" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base" });
+
+    // Branch a with change
+    try h.git(&.{ "checkout", "-b", "branch_a" });
+    try h.writeFile("file.txt", "version A");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "commit A" });
+
+    // Master branch with conflicting change and upstream tracking
+    try h.git(&.{ "checkout", "master" });
+    try h.writeFile("file.txt", "version B");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "commit B" });
+
+    // Merge branch_a into master causing conflict
+    _ = try h.gitAllowFail(&.{ "merge", "branch_a" });
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+        \\
+        \\[git_status]
+        \\conflicted = "[CONFLICT]"
+        \\style = "bold red"
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "[CONFLICT]");
+}
+
+
+
