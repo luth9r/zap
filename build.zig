@@ -20,12 +20,26 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
-
-    const run_exe_tests = b.addRunArtifact(exe_tests);
-
     const test_step = b.step("test", "Run unit and integration tests");
-    test_step.dependOn(&run_exe_tests.step);
+
+    const test_groups = [_][]const []const u8{
+        &.{"modules.git"},
+        &.{"modules.os"},
+        &.{"modules.directory"},
+        &.{ "modules.character", "modules.cmd_duration" },
+        &.{ "tests.harness", "utils", "config", "engine", "init" },
+    };
+
+    for (test_groups, 0..) |filters, i| {
+        const group_name = b.fmt("test_{d}", .{i});
+        const exe_tests = b.addTest(.{
+            .name = group_name,
+            .root_module = exe.root_module,
+            .filters = filters,
+        });
+
+        const run_exe_tests = b.addRunArtifact(exe_tests);
+        run_exe_tests.step.dependOn(b.getInstallStep());
+        test_step.dependOn(&run_exe_tests.step);
+    }
 }

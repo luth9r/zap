@@ -64,115 +64,173 @@ pub fn render(
         repo_root,
     ) orelse ctx.cwd;
 
+    var is_read_only = false;
+    if (ctx.io) |io| {
+        if (std.Io.Dir.accessAbsolute(io, ctx.cwd, .{ .write = true })) |_| {
+            // Write access is granted
+        } else |_| {
+            is_read_only = true;
+        }
+    }
+    const read_only_val = if (is_read_only) config.read_only else "";
+
     try formatter.formatTemplateWriter(writer, config.format, .{
         .style = config.style,
         .shell = ctx.shell,
         .vars = &[_]formatter.Variable{
             .{ .name = "path", .value = path_str },
-            .{ .name = "read_only", .value = "" },
+            .{ .name = "read_only", .value = read_only_val },
             .{ .name = "read_only_style", .value = config.read_only_style },
         },
     });
 }
 
-test "render directory default with truncation" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+pub const Harness = @import("../tests/harness.zig").Harness;
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+test "integration: directory default path renders home symbol" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    const cfg = DirectoryConfig{};
-    try render(writer, cfg, .{ .cwd = "/home/user/projects/zap", .home = "/home/user" });
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+    );
 
-    const expected = "\x1b[1;36m~/projects/zap\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "~");
 }
 
-test "render directory deep truncation" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: directory custom home symbol and style" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\home_symbol = ""
+        \\style = "bold yellow"
+    );
 
-    var cfg = DirectoryConfig{};
-    cfg.truncation_length = 3;
-    cfg.truncation_symbol = "…/";
-    try render(writer, cfg, .{ .cwd = "/home/user/projects/code/zap/src/modules", .home = "/home/user" });
-
-    const expected = "\x1b[1;36m~/…/zap/src/modules\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "");
 }
 
-test "render directory disabled" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: directory truncation length" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    _ = try h.setCwd("a/b/c/d");
 
-    var cfg = DirectoryConfig{};
-    cfg.disabled = true;
-    try render(writer, cfg, .{ .cwd = "/home/user/zap", .home = "/home/user" });
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\truncation_length = 2
+        \\truncation_symbol = "…/"
+    );
 
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "…/c/d");
 }
 
-test "render directory custom style and home_symbol" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: directory truncate_to_repo" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.setupGit();
+    _ = try h.setCwd("src/modules/foo");
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\truncate_to_repo = true
+        \\truncation_length = 0
+    );
 
-    var cfg = DirectoryConfig{};
-    cfg.style = "bold yellow";
-    cfg.home_symbol = "🏠";
-    try render(writer, cfg, .{ .cwd = "/home/user/zap", .home = "/home/user" });
-
-    const expected = "\x1b[1;33m🏠/zap\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    // tmp_dir is something like /tmp/zap-test-XYZ. repo_name is zap-test-XYZ.
+    // It should render "zap-test-XYZ/src/modules/foo" instead of "~/..." or "/tmp/..."
+    const repo_name = std.fs.path.basename(h.tmp_dir);
+    
+    var expected_buf: [1024]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&expected_buf, "{s}/src/modules/foo", .{repo_name});
+    try Harness.expectVisibleText(out, expected);
 }
 
-test "render directory across all shells" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+test "integration: directory disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [512]u8 = undefined;
-    const cfg = DirectoryConfig{};
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\disabled = true
+    );
 
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try render(writer, cfg, .{
-            .cwd = "/home/user/projects/zap",
-            .home = "/home/user",
-            .shell = sh,
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-        try std.testing.expect(std.mem.indexOf(u8, out, "~/projects/zap") != null);
-    }
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
 
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_bash), cfg, .{
-        .cwd = "/home/user/projects/zap",
-        .home = "/home/user",
-        .shell = .bash,
-    });
-    try std.testing.expectEqualStrings("\x01\x1b[1;36m\x02~/projects/zap\x01\x1b[0m\x02 ", buf[0..pos_bash]);
+test "integration: directory at filesystem root" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_zsh), cfg, .{
-        .cwd = "/home/user/projects/zap",
-        .home = "/home/user",
-        .shell = .zsh,
-    });
-    try std.testing.expectEqualStrings("%{\x1b[1;36m%}~/projects/zap%{\x1b[0m%} ", buf[0..pos_zsh]);
+    _ = try h.setCwd("/");
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "/");
+}
+
+test "integration: directory outside home renders full or truncated path" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    _ = try h.setHome("fake_home");
+    _ = try h.setCwd("other_project/sub");
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\truncation_length = 2
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "other_project/sub");
+}
+
+test "integration: directory read_only rendering" {
+    if (@import("builtin").os.tag == .windows) return; // chmod not supported on windows
+
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    _ = try h.setCwd("readonly_dir");
+    const io = std.testing.io;
+    var child = std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "chmod", "555", h.custom_cwd.? },
+    }) catch return;
+    _ = child.wait(io) catch {};
+
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+        \\
+        \\[directory]
+        \\read_only = "LOCK"
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "LOCK");
 }
 

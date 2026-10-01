@@ -26,3 +26,10 @@ dist/
 
 *.tar.gz
 *.zip
+
+# AI / Scratch
+.gemini/
+AGENTS.md
+scratch.zig
+update_refs.zig
+

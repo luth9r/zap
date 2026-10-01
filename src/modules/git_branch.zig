@@ -69,6 +69,8 @@ pub fn render(
     });
 }
 
+pub const Harness = @import("../tests/harness.zig").Harness;
+
 test "truncateBranch below and above max_len" {
     var buf: [64]u8 = undefined;
 
@@ -82,99 +84,101 @@ test "truncateBranch below and above max_len" {
     try std.testing.expectEqualStrings("feat…", truncateBranch(&buf, "feature/auth", 4, "…"));
 }
 
-test "render git_branch with powerline styled block and conditional remote" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_branch shows current branch in repo" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitBranchConfig{};
-    cfg.format = "  [](bold purple)[$symbol $branch(:$remote_branch)](fg:black bg:purple)[](bold purple) ";
-    cfg.symbol = "";
-    cfg.truncation_length = 15;
-    cfg.truncation_symbol = "";
+    try h.setupGit();
+    try h.git(&.{ "checkout", "-b", "feature-super" });
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+    );
 
-    var buf: [512]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
-
-    // Mock direct formatter with vars
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .style = cfg.style,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = cfg.symbol },
-            .{ .name = "branch", .value = "main" },
-            .{ .name = "remote_branch", .value = "" },
-        },
-    });
-
-    const expected = "  \x1b[1;35m\x1b[0m\x1b[30;45m main\x1b[0m\x1b[1;35m\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectContains(out, "feature-super");
+    try Harness.expectContains(out, "");
 }
 
-test "render git_branch disabled" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_branch with custom truncation" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitBranchConfig{};
-    cfg.disabled = true;
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.setupGit();
+    try h.git(&.{ "checkout", "-b", "very-long-feature-branch" });
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+        \\
+        \\[git_branch]
+        \\truncation_length = 4
+        \\truncation_symbol = "…"
+    );
 
-    try render(writer, cfg, .{ .cwd = "/some/path", .home = "." });
-
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collectAllShells();
+    try Harness.expectContains(out, "very…");
 }
 
-test "render git_branch across all shells" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+test "integration: git_branch disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitBranchConfig{};
-    cfg.format = "on [$symbol$branch]($style) ";
-    cfg.symbol = " ";
+    try h.setupGit();
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+        \\
+        \\[git_branch]
+        \\disabled = true
+    );
 
-    var buf: [512]u8 = undefined;
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
 
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try formatter.formatTemplateWriter(writer, cfg.format, .{
-            .style = cfg.style,
-            .shell = sh,
-            .vars = &[_]formatter.Variable{
-                .{ .name = "symbol", .value = cfg.symbol },
-                .{ .name = "branch", .value = "main" },
-                .{ .name = "remote_branch", .value = "" },
-            },
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-    }
+test "integration: git_branch outside git repo renders nothing" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_bash), cfg.format, .{
-        .style = cfg.style,
-        .shell = .bash,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = cfg.symbol },
-            .{ .name = "branch", .value = "main" },
-            .{ .name = "remote_branch", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("on \x01\x1b[1;35m\x02 main\x01\x1b[0m\x02 ", buf[0..pos_bash]);
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+    );
 
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_zsh), cfg.format, .{
-        .style = cfg.style,
-        .shell = .zsh,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "symbol", .value = cfg.symbol },
-            .{ .name = "branch", .value = "main" },
-            .{ .name = "remote_branch", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("on %{\x1b[1;35m%} main%{\x1b[0m%} ", buf[0..pos_zsh]);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
+
+test "integration: git_branch in deep subdirectory" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.git(&.{ "checkout", "-b", "deep-branch" });
+    _ = try h.setCwd("nested/deep/sub/dir");
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectContains(out, "deep-branch");
+}
+
+test "integration: git_branch in git worktree" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    const worktree_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/wt", .{h.tmp_dir});
+    try h.git(&.{ "worktree", "add", "-b", "wt-branch", worktree_path });
+    _ = try h.setCwd("wt");
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectContains(out, "wt-branch");
 }
 

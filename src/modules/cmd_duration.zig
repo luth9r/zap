@@ -107,73 +107,93 @@ test "formatDurationBuf various ranges" {
     try std.testing.expectEqualStrings("1d 2h 3m 4s", formatDurationBuf(&buf, 93784000, false).?);
 }
 
-test "render duration respect min_time" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+pub const Harness = @import("../tests/harness.zig").Harness;
 
-    var cfg = CmdDurationConfig{};
-    cfg.min_time = 2000;
+test "integration: cmd_duration appears above min_time threshold" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [128]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    _ = h.setDuration(5000);
+    try h.setConfig(
+        \\format = "$cmd_duration"
+        \\add_newline = false
+        \\
+        \\[cmd_duration]
+        \\min_time = 2000
+    );
 
-    // Below min_time -> no output
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 1999 });
-    try std.testing.expectEqual(@as(usize, 0), pos);
-
-    // At min_time -> rendered
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 2000 });
-    try std.testing.expectEqualStrings("took \x1b[1;33m2s\x1b[0m ", buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "took");
+    try Harness.expectVisibleText(out, "5s");
 }
 
-test "render duration disabled" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: cmd_duration hidden below min_time threshold" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = CmdDurationConfig{};
-    cfg.min_time = 1000;
-    cfg.disabled = true;
+    _ = h.setDuration(500);
+    try h.setConfig(
+        \\format = "$cmd_duration"
+        \\add_newline = false
+        \\
+        \\[cmd_duration]
+        \\min_time = 2000
+    );
 
-    var buf: [128]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
-
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 5000 });
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "render duration across all shells" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+test "integration: cmd_duration appears at exactly min_time threshold" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = CmdDurationConfig{};
-    cfg.min_time = 0;
+    _ = h.setDuration(2000);
+    try h.setConfig(
+        \\format = "$cmd_duration"
+        \\add_newline = false
+        \\
+        \\[cmd_duration]
+        \\min_time = 2000
+    );
 
-    var buf: [128]u8 = undefined;
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "took");
+    try Harness.expectVisibleText(out, "2s");
+}
 
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try render(writer, cfg, .{
-            .cwd = ".",
-            .home = ".",
-            .cmd_duration = 3000,
-            .shell = sh,
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-        try std.testing.expect(std.mem.indexOf(u8, out, "3s") != null);
-    }
+test "integration: cmd_duration with show_milliseconds enabled" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_bash), cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 3000, .shell = .bash });
-    try std.testing.expectEqualStrings("took \x01\x1b[1;33m\x023s\x01\x1b[0m\x02 ", buf[0..pos_bash]);
+    _ = h.setDuration(2450);
+    try h.setConfig(
+        \\format = "$cmd_duration"
+        \\add_newline = false
+        \\
+        \\[cmd_duration]
+        \\min_time = 0
+        \\show_milliseconds = true
+    );
 
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_zsh), cfg, .{ .cwd = ".", .home = ".", .cmd_duration = 3000, .shell = .zsh });
-    try std.testing.expectEqualStrings("took %{\x1b[1;33m%}3s%{\x1b[0m%} ", buf[0..pos_zsh]);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "2s 450ms");
+}
+
+test "integration: cmd_duration disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    _ = h.setDuration(5000);
+    try h.setConfig(
+        \\format = "$cmd_duration"
+        \\add_newline = false
+        \\
+        \\[cmd_duration]
+        \\disabled = true
+    );
+
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 

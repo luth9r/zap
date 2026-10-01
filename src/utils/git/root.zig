@@ -1,6 +1,7 @@
 const std = @import("std");
 
-pub const fs = @import("fs.zig");
+pub const fs = @import("../fs.zig");
+pub const dir = @import("dir.zig");
 pub const refs = @import("refs.zig");
 pub const state = @import("state.zig");
 
@@ -34,11 +35,12 @@ pub const GitStateType = state.GitStateType;
 pub const GitStateResult = state.GitStateResult;
 
 // Re-export standalone utility functions
-pub const findGitDir = fs.findGitDir;
-pub const parseGitDirPointer = fs.parseGitDirPointer;
+pub const findGitDir = dir.findGitDir;
+pub const parseGitDirPointer = dir.parseGitDirPointer;
 pub const fileExists = fs.fileExists;
 pub const anySubpathExists = fs.anySubpathExists;
 pub const readSmallFile = fs.readSmallFile;
+pub const writeFileAbsolute = fs.writeFileAbsolute;
 
 pub const parseHeadContent = refs.parseHeadContent;
 pub const getGitBranch = refs.getGitBranch;

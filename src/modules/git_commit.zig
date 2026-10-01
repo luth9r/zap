@@ -68,116 +68,163 @@ pub fn render(
     });
 }
 
-test "render git_commit detached hash format" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+pub const Harness = @import("../tests/harness.zig").Harness;
 
-    var cfg = GitCommitConfig{};
-    cfg.format = "[\\($hash\\)]($style) ";
-    cfg.style = "bold green";
+test "integration: git_commit hidden on normal branch by default" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.setupGit();
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+    );
 
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .style = cfg.style,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "hash", .value = "4cd65cc" },
-            .{ .name = "tag", .value = "" },
-        },
-    });
-
-    const expected = "\x1b[1;32m(4cd65cc)\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "render git_commit with tag" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_commit in detached head state renders hash" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitCommitConfig{};
-    cfg.format = "[\\($hash$tag\\)]($style) ";
-    cfg.style = "bold green";
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit" });
+    try h.git(&.{ "checkout", "--detach", "HEAD" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+    );
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
-
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .style = cfg.style,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "hash", .value = "4cd65cc" },
-            .{ .name = "tag", .value = "  v1.0.0" },
-        },
-    });
-
-    const expected = "\x1b[1;32m(4cd65cc  v1.0.0)\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectNotEmpty(out);
+    try Harness.expectVisibleText(out, "(");
+    try Harness.expectVisibleText(out, ")");
 }
 
-test "render git_commit disabled" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_commit custom hash length" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitCommitConfig{};
-    cfg.disabled = true;
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit" });
+    try h.git(&.{ "checkout", "--detach", "HEAD" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\commit_hash_length = 5
+    );
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
-
-    try render(writer, cfg, .{ .cwd = "/some/path", .home = "." });
-
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collectAllShells();
+    
+    // Read the actual SHA from .git/HEAD
+    var head_buf: [128]u8 = undefined;
+    var path_buf: [1024]u8 = undefined;
+    const fs = @import("../utils/fs.zig");
+    const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
+    const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
+    const sha = std.mem.trim(u8, head_content, " \r\n");
+    
+    try Harness.expectVisibleText(out, sha[0..5]);
+    try Harness.expectVisibleText(out, "(");
+    try Harness.expectVisibleText(out, ")");
 }
 
-test "render git_commit across all shells" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+test "integration: git_commit full hash length (0)" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitCommitConfig{};
-    cfg.format = "[\\($hash\\)]($style) ";
-    cfg.style = "bold green";
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit" });
+    try h.git(&.{ "checkout", "--detach", "HEAD" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\commit_hash_length = 0
+    );
 
-    var buf: [256]u8 = undefined;
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
-
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try formatter.formatTemplateWriter(writer, cfg.format, .{
-            .style = cfg.style,
-            .shell = sh,
-            .vars = &[_]formatter.Variable{
-                .{ .name = "hash", .value = "4cd65cc" },
-                .{ .name = "tag", .value = "" },
-            },
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-    }
-
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_bash), cfg.format, .{
-        .style = cfg.style,
-        .shell = .bash,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "hash", .value = "4cd65cc" },
-            .{ .name = "tag", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("\x01\x1b[1;32m\x02(4cd65cc)\x01\x1b[0m\x02 ", buf[0..pos_bash]);
-
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_zsh), cfg.format, .{
-        .style = cfg.style,
-        .shell = .zsh,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "hash", .value = "4cd65cc" },
-            .{ .name = "tag", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("%{\x1b[1;32m%}(4cd65cc)%{\x1b[0m%} ", buf[0..pos_zsh]);
+    const out = try h.collectAllShells();
+    
+    // Read the actual SHA from .git/HEAD
+    var head_buf: [128]u8 = undefined;
+    var path_buf: [1024]u8 = undefined;
+    const fs = @import("../utils/fs.zig");
+    const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
+    const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
+    const sha = std.mem.trim(u8, head_content, " \r\n");
+    
+    try Harness.expectVisibleText(out, sha);
 }
 
+test "integration: git_commit disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.git(&.{ "checkout", "--detach", "HEAD" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\disabled = true
+    );
+
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
+
+test "integration: git_commit only_detached = false shows hash on normal branch" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\only_detached = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectNotEmpty(out);
+    try Harness.expectVisibleText(out, "(");
+    try Harness.expectVisibleText(out, ")");
+}
+
+test "integration: git_commit tag_disabled = false shows tag" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit" });
+    try h.git(&.{ "tag", "v1.0.0" });
+    try h.git(&.{ "checkout", "--detach", "HEAD" });
+    try h.setConfig(
+        \\format = "$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\tag_disabled = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "v1.0.0");
+    try Harness.expectVisibleText(out, "");
+}

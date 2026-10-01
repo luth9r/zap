@@ -14,6 +14,7 @@ pub const parseGitDirPointer = git.parseGitDirPointer;
 pub const fileExists = git.fileExists;
 pub const anySubpathExists = git.anySubpathExists;
 pub const readSmallFile = git.readSmallFile;
+pub const writeFileAbsolute = git.writeFileAbsolute;
 
 pub const parseHeadContent = git.parseHeadContent;
 pub const getGitBranch = git.getGitBranch;

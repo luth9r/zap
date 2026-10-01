@@ -19,7 +19,6 @@ pub const buffer_writer = @import("utils/buffer_writer.zig");
 pub const path_utils = @import("utils/path_utils.zig");
 pub const git_utils = @import("utils/git_utils.zig");
 pub const init_mod = @import("init/root.zig");
-pub const shell_integration_test = @import("tests/shell_integration_test.zig");
 
 const Config = config_mod.Config;
 const BufferWriter = buffer_writer.BufferWriter;
@@ -160,4 +159,6 @@ fn resolveCwdPath(init: std.process.Init, buf: *[std.fs.max_path_bytes]u8) []con
 
 test {
     std.testing.refAllDecls(@This());
+    _ = @import("tests/shell_integration_test.zig");
+    _ = @import("tests/harness.zig");
 }

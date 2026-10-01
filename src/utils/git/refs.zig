@@ -1,5 +1,6 @@
 const std = @import("std");
-const fs = @import("fs.zig");
+const fs = @import("../fs.zig");
+const dir = @import("dir.zig");
 
 /// Parses the contents of a .git/HEAD file and extracts the branch name or short commit SHA.
 pub fn parseHeadContent(content_raw: []const u8) ?[]const u8 {
@@ -56,7 +57,7 @@ pub fn getGitBranch(
     git_dir_buf: *[std.fs.max_path_bytes]u8,
     head_content_buf: *[512]u8,
 ) ?[]const u8 {
-    const git_dir = fs.findGitDir(io, cwd, git_dir_buf) orelse return null;
+    const git_dir = dir.findGitDir(io, cwd, git_dir_buf) orelse return null;
     return getGitBranchFromDir(io, git_dir, head_content_buf);
 }
 
@@ -65,6 +66,88 @@ pub const GitCommitResult = struct {
     tag: []const u8 = "",
     is_detached: bool = false,
 };
+
+fn findTagForHash(
+    io: std.Io,
+    git_dir: []const u8,
+    target_sha: []const u8,
+    tag_name_buf: []u8,
+) ?[]const u8 {
+    var tags_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tags_path = std.fmt.bufPrint(&tags_path_buf, "{s}/refs/tags", .{git_dir}) catch return null;
+
+    if (std.Io.Dir.openDirAbsolute(io, tags_path, .{ .iterate = true })) |tags_dir| {
+        var dir_val = tags_dir;
+        defer dir_val.close(io);
+        var iter = std.Io.Dir.iterate(dir_val);
+        while (iter.next(io) catch null) |entry| {
+            if (entry.kind == .file) {
+                var file_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const file_path = std.fmt.bufPrint(&file_path_buf, "{s}/{s}", .{tags_path, entry.name}) catch continue;
+                
+                var sha_buf: [64]u8 = undefined;
+                if (fs.readSmallFile(io, file_path, &sha_buf)) |raw_sha| {
+                    const sha = std.mem.trim(u8, raw_sha, " \t\r\n");
+                    if (std.mem.eql(u8, sha, target_sha)) {
+                        const name_len = @min(entry.name.len, tag_name_buf.len);
+                        @memcpy(tag_name_buf[0..name_len], entry.name[0..name_len]);
+                        return tag_name_buf[0..name_len];
+                    }
+                }
+            }
+        }
+    } else |_| {}
+
+    var packed_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const packed_path = std.fmt.bufPrint(&packed_path_buf, "{s}/packed-refs", .{git_dir}) catch return null;
+    if (std.Io.Dir.openFileAbsolute(io, packed_path, .{})) |file_h| {
+        var f = file_h;
+        defer f.close(io);
+        var stream_buf: [4096]u8 = undefined;
+        var reader = f.reader(io, &stream_buf);
+        var content_buf: [32768]u8 = undefined;
+        const bytes = reader.interface.readSliceShort(&content_buf) catch 0;
+        const packed_content = content_buf[0..bytes];
+        
+        var lines = std.mem.splitScalar(u8, packed_content, '\n');
+        var prev_line_tag: ?[]const u8 = null;
+        
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \r");
+            if (trimmed.len == 0 or trimmed[0] == '#') continue;
+            
+            if (trimmed[0] == '^') {
+                const peeled_sha = trimmed[1..];
+                if (std.mem.eql(u8, peeled_sha, target_sha)) {
+                    if (prev_line_tag) |tag_ref| {
+                        if (std.mem.startsWith(u8, tag_ref, "refs/tags/")) {
+                            const tag_name = tag_ref["refs/tags/".len..];
+                            const name_len = @min(tag_name.len, tag_name_buf.len);
+                            @memcpy(tag_name_buf[0..name_len], tag_name[0..name_len]);
+                            return tag_name_buf[0..name_len];
+                        }
+                    }
+                }
+            } else {
+                var it = std.mem.splitScalar(u8, trimmed, ' ');
+                const sha = it.next() orelse continue;
+                const ref = it.next() orelse continue;
+                
+                if (std.mem.eql(u8, sha, target_sha)) {
+                    if (std.mem.startsWith(u8, ref, "refs/tags/")) {
+                        const tag_name = ref["refs/tags/".len..];
+                        const name_len = @min(tag_name.len, tag_name_buf.len);
+                        @memcpy(tag_name_buf[0..name_len], tag_name[0..name_len]);
+                        return tag_name_buf[0..name_len];
+                    }
+                }
+                prev_line_tag = ref;
+            }
+        }
+    } else |_| {}
+
+    return null;
+}
 
 /// Resolves commit hash and detached state from .git directory.
 pub fn getGitCommit(
@@ -98,8 +181,10 @@ pub fn getGitCommit(
             const ref_bytes = ref_reader.interface.readSliceShort(ref_content_buf) catch 0;
             if (ref_bytes >= 7) {
                 const sha = std.mem.trim(u8, ref_content_buf[0..ref_bytes], " \t\r\n");
+                const tag = findTagForHash(io, git_dir, sha, ref_content_buf[64..192]) orelse "";
                 return GitCommitResult{
                     .hash = sha,
+                    .tag = tag,
                     .is_detached = false,
                 };
             }
@@ -110,8 +195,10 @@ pub fn getGitCommit(
             .is_detached = false,
         };
     } else if (raw_head.len >= 7) {
+        const tag = findTagForHash(io, git_dir, raw_head, ref_content_buf[0..128]) orelse "";
         return GitCommitResult{
             .hash = raw_head,
+            .tag = tag,
             .is_detached = true,
         };
     }

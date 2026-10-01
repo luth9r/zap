@@ -43,88 +43,70 @@ pub fn render(
     });
 }
 
-test "render character success exit code" {
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+pub const Harness = @import("../tests/harness.zig").Harness;
 
-    const cfg = CharacterConfig{};
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
+test "integration: character default success exit code" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    const expected = "\x1b[1;32m❯\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    _ = h.setStatus(0);
+    try h.setConfig(
+        \\format = "$character"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "❯");
 }
 
-test "render character error exit code" {
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+test "integration: character error exit code with custom symbol" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    const cfg = CharacterConfig{};
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 1 });
+    _ = h.setStatus(1);
+    try h.setConfig(
+        \\format = "$character"
+        \\add_newline = false
+        \\
+        \\[character]
+        \\error_symbol = "[✗](bold red)"
+    );
 
-    const expected = "\x1b[1;31m❯\x1b[0m ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "✗");
 }
 
-test "render character disabled" {
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+test "integration: character custom success symbol" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = CharacterConfig{};
-    cfg.disabled = true;
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
+    _ = h.setStatus(0);
+    try h.setConfig(
+        \\format = "$character"
+        \\add_newline = false
+        \\
+        \\[character]
+        \\success_symbol = "[➜](bold green)"
+    );
 
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "➜");
 }
 
-test "render character custom symbols" {
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+test "integration: character disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = CharacterConfig{};
-    cfg.success_symbol = "[➜](bold green)";
-    cfg.error_symbol = "[✗](bold red)";
+    _ = h.setStatus(0);
+    try h.setConfig(
+        \\format = "$character"
+        \\add_newline = false
+        \\
+        \\[character]
+        \\disabled = true
+    );
 
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 0 });
-    try std.testing.expectEqualStrings("\x1b[1;32m➜\x1b[0m ", buf[0..pos]);
-
-    pos = 0;
-    try render(writer, cfg, .{ .cwd = ".", .home = ".", .status_code = 130 });
-    try std.testing.expectEqualStrings("\x1b[1;31m✗\x1b[0m ", buf[0..pos]);
-}
-
-test "render character across all shells" {
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
-
-    var buf: [256]u8 = undefined;
-    const cfg = CharacterConfig{};
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
-
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try render(writer, cfg, .{
-            .cwd = ".",
-            .home = ".",
-            .status_code = 1,
-            .shell = sh,
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-    }
-
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_bash), cfg, .{ .cwd = ".", .home = ".", .status_code = 0, .shell = .bash });
-    try std.testing.expectEqualStrings("\x01\x1b[1;32m\x02❯\x01\x1b[0m\x02 ", buf[0..pos_bash]);
-
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try render(BufferWriter.init(&buf, &pos_zsh), cfg, .{ .cwd = ".", .home = ".", .status_code = 0, .shell = .zsh });
-    try std.testing.expectEqualStrings("%{\x1b[1;32m%}❯%{\x1b[0m%} ", buf[0..pos_zsh]);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 

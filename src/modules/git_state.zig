@@ -67,120 +67,182 @@ pub fn render(
     });
 }
 
-test "render git_state with merge operation" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+pub const Harness = @import("../tests/harness.zig").Harness;
 
-    var cfg = GitStateConfig{};
-    cfg.format = "\\([$state]($style)\\) ";
-    cfg.style = "bold yellow";
+test "integration: git_state renders nothing in normal clean repo" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.setupGit();
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
 
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .style = cfg.style,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "state", .value = cfg.merge },
-            .{ .name = "progress_current", .value = "" },
-            .{ .name = "progress_total", .value = "" },
-        },
-    });
-
-    const expected = "(\x1b[1;33mMERGING\x1b[0m) ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "render git_state with rebase progress" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_state during merge conflict" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitStateConfig{};
-    cfg.format = "\\([$state( $progress_current/$progress_total)]($style)\\) ";
-    cfg.style = "bold yellow";
+    try h.setupGit();
+    try h.writeFile("conflict.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base" });
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
+    try h.git(&.{ "checkout", "-b", "branch-a" });
+    try h.writeFile("conflict.txt", "branch a version");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "change in a" });
 
-    try formatter.formatTemplateWriter(writer, cfg.format, .{
-        .style = cfg.style,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "state", .value = cfg.rebase },
-            .{ .name = "progress_current", .value = "2" },
-            .{ .name = "progress_total", .value = "5" },
-        },
-    });
+    try h.git(&.{ "checkout", "master" });
+    try h.writeFile("conflict.txt", "branch main version");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "change in main" });
 
-    const expected = "(\x1b[1;33mREBASING 2/5\x1b[0m) ";
-    try std.testing.expectEqualStrings(expected, buf[0..pos]);
+    // Trigger merge conflict (git merge exits with non-zero on conflict)
+    _ = try h.gitAllowFail(&.{ "merge", "branch-a" });
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "MERGING");
 }
 
-test "render git_state disabled" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+test "integration: git_state disabled in config" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitStateConfig{};
-    cfg.disabled = true;
+    try h.setupGit();
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+        \\
+        \\[git_state]
+        \\disabled = true
+    );
 
-    var buf: [256]u8 = undefined;
-    var pos: usize = 0;
-    const writer = BufferWriter.init(&buf, &pos);
-
-    try render(writer, cfg, .{ .cwd = "/some/path", .home = "." });
-
-    try std.testing.expectEqual(@as(usize, 0), pos);
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 
-test "render git_state across all shells" {
-    const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
-    const Shell = @import("../init/root.zig").Shell;
-    const assertValidShellAnsi = @import("../tests/fixture.zig").Fixture.assertValidShellAnsi;
+test "integration: git_state during rebase conflict" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
 
-    var cfg = GitStateConfig{};
-    cfg.format = "\\([$state]($style)\\) ";
-    cfg.style = "bold yellow";
+    try h.setupGit();
+    try h.writeFile("conflict.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base" });
 
-    var buf: [256]u8 = undefined;
-    const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+    try h.git(&.{ "checkout", "-b", "feature" });
+    try h.writeFile("conflict.txt", "feature version");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "feature change" });
 
-    for (shells) |sh| {
-        var pos: usize = 0;
-        const writer = BufferWriter.init(&buf, &pos);
-        try formatter.formatTemplateWriter(writer, cfg.format, .{
-            .style = cfg.style,
-            .shell = sh,
-            .vars = &[_]formatter.Variable{
-                .{ .name = "state", .value = "REBASING" },
-                .{ .name = "progress_current", .value = "" },
-                .{ .name = "progress_total", .value = "" },
-            },
-        });
-        const out = buf[0..pos];
-        try assertValidShellAnsi(out, sh);
-    }
+    try h.git(&.{ "checkout", "master" });
+    try h.writeFile("conflict.txt", "main version");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "main change" });
 
-    // Exact string verification for Bash
-    var pos_bash: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_bash), cfg.format, .{
-        .style = cfg.style,
-        .shell = .bash,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "state", .value = "REBASING" },
-            .{ .name = "progress_current", .value = "" },
-            .{ .name = "progress_total", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("(\x01\x1b[1;33m\x02REBASING\x01\x1b[0m\x02) ", buf[0..pos_bash]);
+    // Trigger rebase conflict
+    _ = try h.gitAllowFail(&.{ "rebase", "feature" });
 
-    // Exact string verification for Zsh
-    var pos_zsh: usize = 0;
-    try formatter.formatTemplateWriter(BufferWriter.init(&buf, &pos_zsh), cfg.format, .{
-        .style = cfg.style,
-        .shell = .zsh,
-        .vars = &[_]formatter.Variable{
-            .{ .name = "state", .value = "REBASING" },
-            .{ .name = "progress_current", .value = "" },
-            .{ .name = "progress_total", .value = "" },
-        },
-    });
-    try std.testing.expectEqualStrings("(%{\x1b[1;33m%}REBASING%{\x1b[0m%}) ", buf[0..pos_zsh]);
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "REBASING");
+}
+
+test "integration: git_state during bisect" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.git(&.{ "bisect", "start" });
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "BISECTING");
+}
+
+test "integration: git_state during cherry-pick" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile(".git/CHERRY_PICK_HEAD", "");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "CHERRY-PICKING");
+}
+
+test "integration: git_state during revert" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile(".git/REVERT_HEAD", "");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "REVERTING");
+}
+
+test "integration: git_state during am" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    const rebase_apply = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-apply", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_apply });
+    try h.writeFile(".git/rebase-apply/applying", "");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "AM");
+}
+
+test "integration: git_state rebase progress" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    const rebase_merge = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-merge", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_merge });
+    try h.writeFile(".git/rebase-merge/msgnum", "2");
+    try h.writeFile(".git/rebase-merge/end", "5");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "REBASING 2/5");
 }
