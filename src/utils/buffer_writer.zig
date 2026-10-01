@@ -55,3 +55,28 @@ test "unit: BufferWriter writes bytes and slices up to capacity" {
     try testing.expectEqual(@as(usize, 16), pos);
     try testing.expectEqualStrings("Hello, World!EXT", memory[0..16]);
 }
+
+test "unit: BufferWriter multi-byte UTF-8 emoji and symbols" {
+    var memory: [64]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&memory, &pos);
+
+    try writer.writeAll("⚡ 🦀 📁 🚀");
+    try testing.expectEqualStrings("⚡ 🦀 📁 🚀", writer.written());
+    try testing.expect(std.unicode.utf8ValidateSlice(writer.written()));
+}
+
+test "unit: BufferWriter print with formatting and safe truncation" {
+    var memory: [12]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&memory, &pos);
+
+    try writer.print("{s} = {d}", .{ "count", 42 });
+    try testing.expectEqualStrings("count = 42", writer.written());
+
+    // Printing past limit safely caps at memory.len
+    try writer.print(" - and more data {d}", .{999});
+    try testing.expectEqual(@as(usize, 12), pos);
+    try testing.expectEqual(@as(usize, 12), writer.written().len);
+}
+

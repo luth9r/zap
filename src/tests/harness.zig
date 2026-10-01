@@ -650,6 +650,7 @@ test "integration: harness: basic prompt renders non-empty output" {
 
     const out = try h.collect(.generic);
     try Harness.expectNotEmpty(out);
+    try Harness.expectContains(out, "❯");
 }
 
 test "integration: harness: default prompt with bash ANSI wrapping" {
@@ -659,6 +660,7 @@ test "integration: harness: default prompt with bash ANSI wrapping" {
     const out = try h.collect(.bash);
     try Harness.expectNotEmpty(out);
     try Harness.expectAnsi(out, .bash);
+    try Harness.expectContains(out, "❯");
 }
 
 test "integration: harness: default prompt with zsh ANSI wrapping" {
@@ -668,6 +670,7 @@ test "integration: harness: default prompt with zsh ANSI wrapping" {
     const out = try h.collect(.zsh);
     try Harness.expectNotEmpty(out);
     try Harness.expectAnsi(out, .zsh);
+    try Harness.expectContains(out, "❯");
 }
 
 test "integration: harness: error status shows error symbol" {
@@ -828,6 +831,8 @@ test "integration: harness: collectAllShells validates every shell" {
 
     const out = try h.collectAllShells();
     try Harness.expectNotEmpty(out);
+    try Harness.expectContains(out, "❯");
+    try Harness.expectContains(out, "master");
 }
 
 test "integration: harness: empty format produces empty prompt" {
@@ -853,6 +858,7 @@ test "integration: harness: invalid toml config falls back safely without crashi
 
     const out = try h.collectAllShells();
     try Harness.expectNotEmpty(out);
+    try Harness.expectContains(out, "❯");
 }
 
 test "integration: harness: deep nested path does not crash" {

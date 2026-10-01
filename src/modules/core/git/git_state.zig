@@ -250,3 +250,44 @@ test "integration: git_state rebase progress" {
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "REBASING 2/5");
 }
+
+test "integration: git_state rebase-apply progress with next and last" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    const rebase_apply = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-apply", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_apply });
+    try h.writeFile(".git/rebase-apply/next", "3");
+    try h.writeFile(".git/rebase-apply/last", "10");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "REBASING 3/10");
+}
+
+test "integration: git_state custom labels and styled format" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile(".git/CHERRY_PICK_HEAD", "");
+
+    try h.setConfig(
+        \\format = "$git_state"
+        \\add_newline = false
+        \\
+        \\[git_state]
+        \\cherry_pick = "PICKING"
+        \\format = "[$state]($style) "
+        \\style = "bold magenta"
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "PICKING");
+}
+

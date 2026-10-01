@@ -184,3 +184,19 @@ test "integration: git_branch in git worktree" {
     const out = try h.collectAllShells();
     try Harness.expectContains(out, "wt-branch");
 }
+
+test "integration: git_branch with slashes and special characters" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.git(&.{ "checkout", "-b", "feature/auth-v2-@beta" });
+    try h.setConfig(
+        \\format = "$git_branch"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectContains(out, "feature/auth-v2-@beta");
+}
+

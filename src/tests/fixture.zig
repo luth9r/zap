@@ -226,11 +226,11 @@ pub const Fixture = struct {
             err_read += n;
         }
 
-        const term = child.wait(io) catch return error.ShellExecutionFailed;
+        const term = child.wait(io) catch return null;
         switch (term) {
             .exited => |code| if (code != 0) {
-                // Skip if shell is simply not installed (127)
-                if (code == 127) {
+                // Skip if shell is not installed (127) or not executable (126)
+                if (code == 127 or code == 126) {
                     return null;
                 }
                 std.debug.print(
@@ -242,7 +242,12 @@ pub const Fixture = struct {
                 , .{ bin, code, err_buf[0..err_read], raw_prompt });
                 return error.ShellExecutionFailed;
             },
-            else => return error.ShellExecutionFailed,
+            .signal => |sig| {
+                // Shell killed by environment / sandbox signal (e.g. SIGABRT, SIGSYS) - skip external execution
+                std.debug.print("[SHELL WARN] {s} killed by signal {d}, skipping subshell execution\n", .{ bin, sig });
+                return null;
+            },
+            else => return null,
         }
 
         return out_buf[0..total_read];

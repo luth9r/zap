@@ -294,3 +294,51 @@ test "unit: computeActiveModulesMask bitmask calculation" {
     const mask_none = computeActiveModulesMask("plain text without modules");
     try testing.expectEqual(@as(u16, 0), mask_none);
 }
+
+const Harness = @import("../tests/harness.zig").Harness;
+
+test "integration: prompt render latency under 1ms in real git repo" {
+    var h = try Harness.create(testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("dirty.txt", "modified content");
+    try h.writeFile("untracked.txt", "untracked");
+    try h.git(&.{ "checkout", "-b", "perf-benchmark-branch" });
+
+    try h.setConfig(
+        \\format = "$directory$git_branch$git_status$character"
+        \\add_newline = false
+    );
+
+    // Warm up subprocess collection
+    const warm_out = try h.collect(.generic);
+    try Harness.expectContains(warm_out, "perf-benchmark-branch");
+
+    // In-process hot render benchmark across 100 iterations with direct .git/HEAD inspection
+    var buf: [2048]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&buf, &pos);
+    var cfg = config_mod.defaultConfig();
+    cfg.format = "$directory$git_branch$character";
+    const io = std.testing.io;
+
+    const in_proc_start = std.Io.Clock.awake.now(io);
+    const in_proc_iters: i96 = 100;
+    for (0..in_proc_iters) |_| {
+        pos = 0;
+        try render(writer, cfg, .{
+            .cwd = h.tmp_dir,
+            .home = h.tmp_dir,
+            .io = io,
+            .status_code = 0,
+            .shell = .bash,
+        });
+    }
+    const in_proc_total_ns = in_proc_start.untilNow(io, .awake).toNanoseconds();
+    const avg_in_proc_ns = @divTrunc(in_proc_total_ns, in_proc_iters);
+
+    // Direct in-process render must be strictly under 1 millisecond (1,000,000 ns)
+    try testing.expect(avg_in_proc_ns < 1_000_000);
+}
+

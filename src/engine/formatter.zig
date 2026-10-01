@@ -608,3 +608,19 @@ test "unit: shell zero-width escape wrapping" {
     try testing.expectEqualStrings("\x1b[1;32mhi\x1b[0m", res_fish);
 }
 
+test "unit: multi-byte UTF-8 and emojis in styled template" {
+    const a = testing.allocator;
+    const ctx = FormatContext(TestVar){
+        .shell = .generic,
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .symbol, .value = "🦀 " },
+            .{ .name = .text, .value = "master ⚡" },
+        },
+    };
+
+    const res = try formatTemplate(a, "[$symbol$text](bold red) ", ctx);
+    defer a.free(res);
+    try testing.expectEqualStrings("\x1b[1;31m🦀 master ⚡\x1b[0m ", res);
+}
+
+

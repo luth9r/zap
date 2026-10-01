@@ -158,7 +158,7 @@ test "integration: directory truncate_to_repo" {
     // tmp_dir is something like /tmp/zap-test-XYZ. repo_name is zap-test-XYZ.
     // It should render "zap-test-XYZ/src/modules/foo" instead of "~/..." or "/tmp/..."
     const repo_name = std.fs.path.basename(h.tmp_dir);
-    
+
     var expected_buf: [1024]u8 = undefined;
     const expected = try std.fmt.bufPrint(&expected_buf, "{s}/src/modules/foo", .{repo_name});
     try Harness.expectVisibleText(out, expected);
@@ -237,3 +237,34 @@ test "integration: directory read_only rendering" {
     try Harness.expectVisibleText(out, "LOCK");
 }
 
+test "integration: directory symlink rendering" {
+    if (@import("builtin").os.tag == .windows) return;
+
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    _ = try h.setHome("fake_home");
+    _ = try h.setCwd("real_target_dir");
+    const real_target = h.custom_cwd.?;
+
+    // Create a symlink in temp dir pointing to real_target_dir
+    const io = std.testing.io;
+    const symlink_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/symlinked_link", .{h.tmp_dir});
+    defer std.testing.allocator.free(symlink_path);
+
+    var child = std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "ln", "-s", real_target, symlink_path },
+    }) catch return;
+    _ = child.wait(io) catch return;
+
+    // Set custom CWD to the symlink path
+    h.custom_cwd = symlink_path;
+
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "symlinked_link");
+}
