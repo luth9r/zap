@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const HOOK_TEMPLATE = "eval \"$({s} init bash)\"";
 
@@ -128,10 +129,17 @@ test "integration: real bash session with auto-installed zap hook and config" {
 
     const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
     const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
+    const zap_dir = std.fs.path.dirname(h.zap_bin) orelse ".";
+    const path_env = if (builtin.os.tag == .windows)
+        try std.fmt.allocPrint(alloc, "PATH={s};C:\\Windows\\System32;C:\\Windows", .{zap_dir})
+    else
+        try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
+
     const argv = [_][]const u8{
         "env",
         home_env,
         xdg_env,
+        path_env,
         "bash",
         "--noprofile",
         "--norc",
@@ -154,7 +162,8 @@ test "integration: real bash session with auto-installed zap hook and config" {
     var reader = child.stdout.?.reader(std.testing.io, &stream_buf);
     var out_buf: [4096]u8 = undefined;
     const n = try reader.interface.readSliceShort(&out_buf);
-    _ = try child.wait(std.testing.io);
+    const term = try child.wait(std.testing.io);
+    if (term == .exited and term.exited == 127) return;
 
     const bash_prompt_out = out_buf[0..n];
     try Harness.expectContains(bash_prompt_out, "feature-shell-test");

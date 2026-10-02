@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const HOOK_TEMPLATE = "eval \"$({s} init zsh)\"";
 
@@ -105,10 +106,17 @@ test "integration: real zsh session with auto-installed zap hook and config" {
 
     const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
     const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
+    const zap_dir = std.fs.path.dirname(h.zap_bin) orelse ".";
+    const path_env = if (builtin.os.tag == .windows)
+        try std.fmt.allocPrint(alloc, "PATH={s};C:\\Windows\\System32;C:\\Windows", .{zap_dir})
+    else
+        try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
+
     const argv = [_][]const u8{
         "env",
         home_env,
         xdg_env,
+        path_env,
         "zsh",
         "-f",
         "+Z",
