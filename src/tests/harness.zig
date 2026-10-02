@@ -55,7 +55,7 @@ pub const Harness = struct {
     status_code: u8,
     cmd_duration: u64,
 
-    const relative_zap_bin = "zig-out/bin/zap";
+    const relative_zap_bin = if (builtin.os.tag == .windows) "zig-out/bin/zap.exe" else "zig-out/bin/zap";
 
     /// Create an isolated test environment with a fresh temporary directory.
     /// The zap binary must be pre-built (`zig build` runs before `zig build test`

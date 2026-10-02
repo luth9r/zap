@@ -16,6 +16,7 @@ pub const SCRIPT =
     \\        $global:_zap_start_time = $null
     \\    }
     \\
+    \\    $env:PWD = "$PWD"
     \\    $out = & "{{EXE}}" prompt --status $lastExitCodeForPrompt --duration $duration --shell powershell
     \\    if ($out -is [array]) {
     \\        $out -join "`n"
