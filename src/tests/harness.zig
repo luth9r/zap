@@ -83,9 +83,23 @@ pub const Harness = struct {
         bin_file.close(io);
         const zap_bin_abs = try alloc.dupe(u8, bin_buf[0..abs_len]);
 
-        // Create temp directory with random suffix
+        // Create temp directory with random suffix outside the repository
         const random: std.Random.IoSource = .{ .io = io };
-        const tmp_dir = try std.fmt.allocPrint(alloc, "/tmp/zap-test-{x}", .{random.interface().int(u64)});
+        const rand_id = random.interface().int(u64);
+        const tmp_dir = if (builtin.os.tag == .windows) blk: {
+            var temp_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const temp_base = if (std.process.getEnvVar(io, &temp_buf, "TEMP") catch null) |t|
+                t
+            else if (std.process.getEnvVar(io, &temp_buf, "TMP") catch null) |t|
+                t
+            else if (std.process.getEnvVar(io, &temp_buf, "USERPROFILE") catch null) |u|
+                try std.fmt.bufPrint(&temp_buf, "{s}\\AppData\\Local\\Temp", .{u})
+            else
+                "C:\\Temp";
+            break :blk try std.fmt.allocPrint(alloc, "{s}\\zap-test-{x}", .{ temp_base, rand_id });
+        } else blk: {
+            break :blk try std.fmt.allocPrint(alloc, "/tmp/zap-test-{x}", .{rand_id});
+        };
         try std.Io.Dir.cwd().createDirPath(io, tmp_dir);
 
         return .{

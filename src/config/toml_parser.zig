@@ -231,7 +231,7 @@ pub fn resolveConfigPathBuf(
 ) ?[]const u8 {
     // User-defined configuration path via environment variable
     if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
-        return custom;
+        if (custom.len > 0) return custom;
     }
 
     // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/zap.toml)
@@ -262,7 +262,7 @@ pub fn resolveExistingConfigPath(
     lookup_env: anytype,
 ) ?[]const u8 {
     if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
-        return custom;
+        if (custom.len > 0) return custom;
     }
 
     const candidates = [_][]const u8{ "zap.toml", "config.toml" };

@@ -12,7 +12,11 @@ pub const SCRIPT =
     \\_zap_preexec() {
     \\    if [ "$_zap_preexec_ready" = "true" ]; then
     \\        _zap_preexec_ready="false"
-    \\        _zap_start_time="${EPOCHREALTIME:-$(date +%s%3N 2>/dev/null || date +%s000)}"
+    \\        if [ -n "$EPOCHREALTIME" ]; then
+    \\            _zap_start_time="$EPOCHREALTIME"
+    \\        else
+    \\            _zap_start_time="$(date +%s 2>/dev/null || echo 0)000"
+    \\        fi
     \\    fi
     \\}
     \\
@@ -21,7 +25,12 @@ pub const SCRIPT =
     \\    local duration=0
     \\
     \\    if [ -n "$_zap_start_time" ]; then
-    \\        local end_time="${EPOCHREALTIME:-$(date +%s%3N 2>/dev/null || date +%s000)}"
+    \\        local end_time
+    \\        if [ -n "$EPOCHREALTIME" ]; then
+    \\            end_time="$EPOCHREALTIME"
+    \\        else
+    \\            end_time="$(date +%s 2>/dev/null || echo 0)000"
+    \\        fi
     \\        if [[ "$_zap_start_time" == *"."* && "$end_time" == *"."* ]]; then
     \\            local start_s="${_zap_start_time%.*}"
     \\            local start_us="${_zap_start_time#*.}"
