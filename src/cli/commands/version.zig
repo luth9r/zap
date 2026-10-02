@@ -18,8 +18,10 @@ test "integration: zap --version and -v" {
     defer h.destroy();
 
     const out_long = try h.execZap(&.{"--version"});
-    try Harness.expectContains(out_long, "zap 1.0.0");
+    try Harness.expectContains(out_long, "zap");
+    try Harness.expectContains(out_long, build_options.version);
 
     const out_short = try h.execZap(&.{"-v"});
-    try Harness.expectContains(out_short, "zap 1.0.0");
+    try Harness.expectContains(out_short, "zap");
+    try Harness.expectContains(out_short, build_options.version);
 }

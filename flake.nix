@@ -49,7 +49,7 @@
           packages = rec {
             zap = pkgs.stdenv.mkDerivation {
               pname = "zap";
-              version = "1.0.0";
+              version = "1.0.1";
               src = ./.;
 
               nativeBuildInputs = [ pkgs.zig ];
