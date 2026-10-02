@@ -239,8 +239,6 @@ pub fn scanGitIndex(
         var entry_fixed: [62]u8 = undefined;
         if (!readExact(&reader, &entry_fixed)) break;
 
-        const mtime_s = std.mem.readInt(u32, entry_fixed[8..12][0..4], .big);
-        const mtime_ns = std.mem.readInt(u32, entry_fixed[12..16][0..4], .big);
         const file_size = std.mem.readInt(u32, entry_fixed[36..40][0..4], .big);
         const flags = std.mem.readInt(u16, entry_fixed[60..62][0..2], .big);
 
@@ -265,13 +263,8 @@ pub fn scanGitIndex(
         if (root_dir) |dir| {
             if (dir.statFile(io, entry_name, .{})) |st| {
                 const on_disk_size = st.size;
-                const on_disk_mtime_s: u32 = @intCast(@max(0, @divTrunc(st.mtime.toNanoseconds(), std.time.ns_per_s)));
-                const on_disk_mtime_ns: u32 = @intCast(@max(0, @mod(st.mtime.toNanoseconds(), std.time.ns_per_s)));
 
-                if (on_disk_size != file_size or
-                    (mtime_s != 0 and on_disk_mtime_s != mtime_s) or
-                    (mtime_ns != 0 and on_disk_mtime_ns != mtime_ns))
-                {
+                if (on_disk_size != file_size) {
                     result.modified = true;
                 }
             } else |err| switch (err) {
