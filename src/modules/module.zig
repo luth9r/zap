@@ -57,6 +57,8 @@ pub fn resolveConfigType(comptime Mod: type) ?type {
     return null;
 }
 
+const fs = @import("../utils/fs.zig");
+
 /// Specification for a declarative language / tool prompt module.
 pub const LanguageSpec = struct {
     name: []const u8,
@@ -88,70 +90,18 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
         /// Fast check whether any relevant file or extension exists in cwd,
         /// or project manifest files in parent directories up to git repo root.
         pub fn detect(io: std.Io, ctx: PromptContext) bool {
-            // 1. Direct check in cwd for explicit files
-            inline for (spec.files) |file_name| {
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ ctx.cwd, file_name })) |full_path| {
-                    if (std.Io.Dir.accessAbsolute(io, full_path, .{})) |_| {
-                        return true;
-                    } else |_| {}
-                } else |_| {}
-            }
+            // 1. Direct check in cwd for explicit manifest/config files
+            if (fs.anySubpathExists(io, ctx.cwd, spec.files)) return true;
 
             // 2. If extensions are specified, check current directory entries
-            if (spec.extensions.len > 0) {
-                var dir = if (std.fs.path.isAbsolute(ctx.cwd))
-                    std.Io.Dir.openDirAbsolute(io, ctx.cwd, .{ .iterate = true }) catch null
-                else
-                    std.Io.Dir.cwd().openDir(io, ctx.cwd, .{ .iterate = true }) catch null;
-                if (dir) |*d| {
-                    defer d.close(io);
-                    var iter = d.iterate();
-                    while (iter.next(io) catch null) |entry| {
-                        inline for (spec.extensions) |ext| {
-                            if (std.mem.endsWith(u8, entry.name, ext)) {
-                                return true;
-                            }
-                        }
-                    }
-                }
+            if (spec.extensions.len > 0 and fs.hasFileWithExtension(io, ctx.cwd, spec.extensions)) {
+                return true;
             }
 
             // 3. Fast upward traversal: check manifest files in parent dirs up to git root (capped by max_scan_depth)
-            if (spec.files.len > 0 and spec.max_scan_depth > 0) {
-                var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-                var repo_root: ?[]const u8 = null;
-                if (ctx.git_dir) |git_dir| {
-                    if (std.mem.endsWith(u8, git_dir, "/.git")) {
-                        repo_root = git_dir[0 .. git_dir.len - "/.git".len];
-                    } else {
-                        repo_root = git_utils.findRepoRoot(io, ctx.cwd, &repo_root_buf);
-                    }
-                } else {
-                    repo_root = git_utils.findRepoRoot(io, ctx.cwd, &repo_root_buf);
-                }
-
-                var curr_dir = std.fs.path.dirname(ctx.cwd);
-                var depth: usize = 0;
-                while (curr_dir) |p| : (depth += 1) {
-                    if (depth >= spec.max_scan_depth) break;
-
-                    inline for (spec.files) |file_name| {
-                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                        if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ p, file_name })) |full_path| {
-                            if (std.Io.Dir.accessAbsolute(io, full_path, .{})) |_| {
-                                return true;
-                            } else |_| {}
-                        } else |_| {}
-                    }
-
-                    if (repo_root) |root| {
-                        if (std.mem.eql(u8, p, root) or !std.mem.startsWith(u8, p, root)) break;
-                    }
-                    if (std.mem.eql(u8, p, ctx.home) or std.mem.eql(u8, p, "/") or p.len == 0) break;
-
-                    curr_dir = std.fs.path.dirname(p);
-                }
+            const repo_root = if (ctx.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            if (fs.scanParentDirsForFiles(io, ctx.cwd, ctx.home, repo_root, spec.files, spec.max_scan_depth)) {
+                return true;
             }
 
             return false;
@@ -207,48 +157,11 @@ pub fn GenericFileModule(comptime spec: FileSpec) type {
         pub const buffer_size: usize = spec.buffer_size;
 
         pub fn detect(io: std.Io, ctx: PromptContext) bool {
-            inline for (spec.files) |file_name| {
-                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ ctx.cwd, file_name })) |full_path| {
-                    if (std.Io.Dir.accessAbsolute(io, full_path, .{})) |_| {
-                        return true;
-                    } else |_| {}
-                } else |_| {}
+            if (fs.anySubpathExists(io, ctx.cwd, spec.files)) return true;
+            const repo_root = if (ctx.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            if (fs.scanParentDirsForFiles(io, ctx.cwd, ctx.home, repo_root, spec.files, spec.max_scan_depth)) {
+                return true;
             }
-
-            if (spec.files.len > 0 and spec.max_scan_depth > 0) {
-                var repo_root: ?[]const u8 = null;
-                if (ctx.git_dir) |git_dir| {
-                    if (std.mem.endsWith(u8, git_dir, "/.git")) {
-                        repo_root = git_dir[0 .. git_dir.len - "/.git".len];
-                    } else {
-                        repo_root = std.fs.path.dirname(git_dir) orelse git_dir;
-                    }
-                }
-
-                var curr_dir = std.fs.path.dirname(ctx.cwd);
-                var depth: usize = 0;
-                while (curr_dir) |p| : (depth += 1) {
-                    if (depth >= spec.max_scan_depth) break;
-
-                    inline for (spec.files) |file_name| {
-                        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                        if (std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ p, file_name })) |full_path| {
-                            if (std.Io.Dir.accessAbsolute(io, full_path, .{})) |_| {
-                                return true;
-                            } else |_| {}
-                        } else |_| {}
-                    }
-
-                    if (repo_root) |root| {
-                        if (std.mem.eql(u8, p, root) or !std.mem.startsWith(u8, p, root)) break;
-                    }
-                    if (std.mem.eql(u8, p, ctx.home) or std.mem.eql(u8, p, "/") or p.len == 0) break;
-
-                    curr_dir = std.fs.path.dirname(p);
-                }
-            }
-
             return false;
         }
 

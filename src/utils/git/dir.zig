@@ -87,10 +87,26 @@ pub fn findRepoRoot(
     return null;
 }
 
+/// Extracts repository root from a known git_dir path without filesystem I/O.
+pub fn gitDirToRepoRoot(git_dir: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, git_dir, "/.git")) {
+        return git_dir[0 .. git_dir.len - "/.git".len];
+    }
+    if (std.mem.indexOf(u8, git_dir, "/.git/worktrees/")) |wt_idx| {
+        return git_dir[0..wt_idx];
+    }
+    return std.fs.path.dirname(git_dir) orelse git_dir;
+}
+
 test "unit: parseGitDirPointer parses valid and invalid pointers" {
     try std.testing.expectEqualStrings(
         "/path/to/.git/worktrees/wt",
         parseGitDirPointer("gitdir: /path/to/.git/worktrees/wt\n").?,
     );
     try std.testing.expect(parseGitDirPointer("not a gitdir pointer") == null);
+}
+
+test "unit: gitDirToRepoRoot extracts repo root" {
+    try std.testing.expectEqualStrings("/home/user/zap", gitDirToRepoRoot("/home/user/zap/.git"));
+    try std.testing.expectEqualStrings("/home/user/zap", gitDirToRepoRoot("/home/user/zap/.git/worktrees/feature"));
 }

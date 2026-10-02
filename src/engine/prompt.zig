@@ -17,9 +17,9 @@ comptime {
 }
 
 /// Computes a bitmask of active modules in a single pass over the format string.
-pub fn computeActiveModulesMask(format: []const u8) u16 {
+pub fn computeActiveModulesMask(format: []const u8) u64 {
     const decls = @typeInfo(modules).@"struct".decls;
-    var mask: u16 = 0;
+    var mask: u64 = 0;
     var i: usize = 0;
     while (i < format.len) {
         if (format[i] == '\\' and i + 1 < format.len) {
@@ -32,7 +32,7 @@ pub fn computeActiveModulesMask(format: []const u8) u16 {
                 if (std.mem.startsWith(u8, rest, decl.name)) {
                     const end = decl.name.len;
                     if (rest.len == end or (!std.ascii.isAlphanumeric(rest[end]) and rest[end] != '_')) {
-                        mask |= @as(u16, 1) << @as(u4, @intCast(idx));
+                        mask |= @as(u64, 1) << @as(u6, @intCast(idx));
                     }
                 }
             }
@@ -56,11 +56,11 @@ pub fn render(writer: anytype, config: config_mod.Config, ctx: PromptContext) !v
     // discover it once on the stack frame and pass it down.
     const git_modules_mask = comptime blk: {
         const d = @typeInfo(modules).@"struct".decls;
-        var m: u16 = 0;
+        var m: u64 = 0;
         for (d, 0..) |decl, idx| {
             const m_mod = @field(modules, decl.name);
             if (@hasDecl(m_mod, "is_git_dependent") and m_mod.is_git_dependent) {
-                m |= @as(u16, 1) << @as(u4, @intCast(idx));
+                m |= @as(u64, 1) << @as(u6, @intCast(idx));
             }
         }
         break :blk m;
@@ -81,10 +81,10 @@ pub fn render(writer: anytype, config: config_mod.Config, ctx: PromptContext) !v
         var buf: [buf_size]u8 = undefined;
         var pos: usize = 0;
 
-        const is_active = (active_mask & (@as(u16, 1) << @as(u4, @intCast(i)))) != 0;
+        const is_active = (active_mask & (@as(u64, 1) << @as(u6, @intCast(i)))) != 0;
         if (is_active) {
             // Fast exit: if this is a purely git-based module and we know we're not in a git repo, skip it
-            const is_git_mod = (git_modules_mask & (@as(u16, 1) << @as(u4, @intCast(i)))) != 0;
+            const is_git_mod = (git_modules_mask & (@as(u64, 1) << @as(u6, @intCast(i)))) != 0;
             if (!is_git_mod or resolved_ctx.git_dir != null) {
                 const mod_writer = BufferWriter.init(&buf, &pos);
                 const mod_cfg = @field(config, decl.name);
@@ -286,13 +286,13 @@ test "unit: render prompt with all git modules in root format" {
 test "unit: computeActiveModulesMask bitmask calculation" {
     // 0: directory, 1: git_branch, 2: git_commit, 3: git_state, 4: git_status, 5: cmd_duration, 6: character
     const mask1 = computeActiveModulesMask("$directory$character");
-    try testing.expectEqual(@as(u16, (1 << 0) | (1 << 6)), mask1);
+    try testing.expectEqual(@as(u64, (1 << 0) | (1 << 6)), mask1);
 
     const mask2 = computeActiveModulesMask("[$directory](cyan) \\$escaped [$cmd_duration](yellow) $character");
-    try testing.expectEqual(@as(u16, (1 << 0) | (1 << 5) | (1 << 6)), mask2);
+    try testing.expectEqual(@as(u64, (1 << 0) | (1 << 5) | (1 << 6)), mask2);
 
     const mask_none = computeActiveModulesMask("plain text without modules");
-    try testing.expectEqual(@as(u16, 0), mask_none);
+    try testing.expectEqual(@as(u64, 0), mask_none);
 }
 
 const Harness = @import("../tests/harness.zig").Harness;

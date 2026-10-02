@@ -9,16 +9,9 @@ pub const Args = struct {
 
 pub fn execute(init: std.process.Init, v_args: Args) !void {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const EnvAdapter = struct {
-        var map_ptr: *const std.process.Environ.Map = undefined;
-        fn get(key: []const u8) ?[]const u8 {
-            return map_ptr.get(key);
-        }
-    };
-    EnvAdapter.map_ptr = init.environ_map;
 
     const config_path = v_args.config_path orelse
-        toml_parser.resolveExistingConfigPath(init.io, &path_buf, EnvAdapter.get) orelse
+        toml_parser.resolveExistingConfigPath(init.io, &path_buf, init.environ_map) orelse
         "~/.config/zap/zap.toml";
 
     var diag_buf: [32768]u8 = undefined;

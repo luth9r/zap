@@ -50,6 +50,15 @@ pub fn FormatContext(comptime EnumType: type) type {
 /// - `writer`: Any streaming writer implementing writeByte and writeAll.
 /// - `template`: Format string template (e.g. `"[$symbol]($style) in [$path](cyan)"`).
 /// - `ctx`: Context supplying variable values and module styles.
+fn writeEscapedByte(writer: anytype, esc: u8) !void {
+    switch (esc) {
+        'n' => try writer.writeByte('\n'),
+        't' => try writer.writeByte('\t'),
+        'r' => try writer.writeByte('\r'),
+        else => try writer.writeByte(esc),
+    }
+}
+
 pub fn formatTemplateWriter(
     writer: anytype,
     template: []const u8,
@@ -58,16 +67,7 @@ pub fn formatTemplateWriter(
     var i: usize = 0;
     while (i < template.len) {
         if (template[i] == '\\' and i + 1 < template.len) {
-            const esc = template[i + 1];
-            if (esc == 'n') {
-                try writer.writeByte('\n');
-            } else if (esc == 't') {
-                try writer.writeByte('\t');
-            } else if (esc == 'r') {
-                try writer.writeByte('\r');
-            } else {
-                try writer.writeByte(esc);
-            }
+            try writeEscapedByte(writer, template[i + 1]);
             i += 2;
             continue;
         }
@@ -287,16 +287,7 @@ fn renderGroupContent(
     var i: usize = 0;
     while (i < raw.len) {
         if (raw[i] == '\\' and i + 1 < raw.len) {
-            const esc = raw[i + 1];
-            if (esc == 'n') {
-                try writer.writeByte('\n');
-            } else if (esc == 't') {
-                try writer.writeByte('\t');
-            } else if (esc == 'r') {
-                try writer.writeByte('\r');
-            } else {
-                try writer.writeByte(esc);
-            }
+            try writeEscapedByte(writer, raw[i + 1]);
             i += 2;
             continue;
         }

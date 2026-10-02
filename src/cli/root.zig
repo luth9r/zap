@@ -31,6 +31,6 @@ pub fn run(init: std.process.Init) !void {
     }
 }
 
-test {
+test "unit: cli refAllDecls" {
     std.testing.refAllDecls(@This());
 }

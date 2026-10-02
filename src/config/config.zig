@@ -46,12 +46,12 @@ pub const Config: type = GenerateConfig();
 
 pub fn defaultConfig() Config {
     var cfg: Config = undefined;
-    @field(cfg, "format") = "$directory$git_branch$git_commit$git_state$git_status$cmd_duration$character";
-    @field(cfg, "add_newline") = true;
+    cfg.format = "$directory$git_branch$git_commit$git_state$git_status$cmd_duration$character";
+    cfg.add_newline = true;
 
     inline for (@typeInfo(registry).@"struct".decls) |decl| {
         const Mod = @field(registry, decl.name);
-        const ModCfgType = module.resolveConfigType(Mod).?;
+        const ModCfgType = comptime module.resolveConfigType(Mod).?;
         @field(cfg, decl.name) = ModCfgType{};
     }
 

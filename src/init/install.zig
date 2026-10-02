@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const root = @import("root.zig");
 const Shell = root.Shell;
-const fs_utils = @import("../utils/fs.zig");
 
 pub const InstallResult = struct {
     already_installed: bool = false,

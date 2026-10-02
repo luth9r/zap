@@ -86,7 +86,7 @@ pub fn parseColor(raw_name: []const u8, fallback: []const u8) []const u8 {
     return fallback;
 }
 
-/// Used only for tasting.
+/// Used only for testing.
 pub fn parseColorAlloc(allocator: std.mem.Allocator, raw_name: []const u8, fallback: []const u8) []const u8 {
     const trimmed = std.mem.trim(u8, raw_name, " \t");
     if (trimmed.len == 0) return fallback;

@@ -48,11 +48,7 @@ pub fn render(
         else
             null;
         if (git_dir_opt) |git_dir| {
-            if (std.mem.endsWith(u8, git_dir, "/.git")) {
-                repo_root = git_dir[0 .. git_dir.len - "/.git".len];
-            } else {
-                repo_root = std.fs.path.dirname(git_dir) orelse git_dir;
-            }
+            repo_root = @import("../../utils/git_utils.zig").gitDirToRepoRoot(git_dir);
         }
     }
 

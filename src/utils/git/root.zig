@@ -38,6 +38,7 @@ pub const GitStateResult = state.GitStateResult;
 // Re-export standalone utility functions
 pub const findGitDir = dir.findGitDir;
 pub const findRepoRoot = dir.findRepoRoot;
+pub const gitDirToRepoRoot = dir.gitDirToRepoRoot;
 pub const parseGitDirPointer = dir.parseGitDirPointer;
 pub const fileExists = fs.fileExists;
 pub const anySubpathExists = fs.anySubpathExists;
@@ -56,40 +57,9 @@ pub const index = @import("index.zig");
 pub const getAheadBehind = ahead_behind.getAheadBehind;
 pub const scanGitIndex = index.scanGitIndex;
 
-/// High-level struct representing an opened Git repository.
-pub const GitRepo = struct {
-    io: std.Io,
-    work_dir: []const u8,
-    git_dir: []const u8,
-
-    pub fn open(io: std.Io, cwd: []const u8, git_dir_buf: *[std.fs.max_path_bytes]u8) ?GitRepo {
-        const git_dir = findGitDir(io, cwd, git_dir_buf) orelse return null;
-        const work_dir = std.fs.path.dirname(git_dir) orelse cwd;
-        return .{
-            .io = io,
-            .work_dir = work_dir,
-            .git_dir = git_dir,
-        };
-    }
-
-    pub fn getStatus(self: GitRepo, branch_name: ?[]const u8) GitStatusInfo {
-        return getGitStatusForDir(self.io, self.work_dir, self.git_dir, branch_name);
-    }
-
-    pub fn getBranch(self: GitRepo, head_buf: *[512]u8) ?[]const u8 {
-        var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-        return getGitBranch(self.io, self.work_dir, &git_dir_buf, head_buf);
-    }
-
-    pub fn getState(self: GitRepo, cur_step_buf: *[32]u8, total_step_buf: *[32]u8) GitStateResult {
-        return getGitState(self.io, self.git_dir, cur_step_buf, total_step_buf);
-    }
-};
-
-
 /// Retrieves git status info for the repository by invoking git child process.
 pub fn getGitStatus(io: std.Io, git_dir: []const u8, branch_name: ?[]const u8) GitStatusInfo {
-    const work_dir = std.fs.path.dirname(git_dir) orelse ".";
+    const work_dir = dir.gitDirToRepoRoot(git_dir);
     return getGitStatusForDir(io, work_dir, git_dir, branch_name);
 }
 
@@ -104,9 +74,7 @@ pub fn getGitStatusForDir(
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const git_dir = git_dir_opt orelse findGitDir(io, work_dir, &git_dir_buf) orelse return info;
-
-    var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const repo_root = findRepoRoot(io, work_dir, &repo_root_buf) orelse work_dir;
+    const repo_root = dir.gitDirToRepoRoot(git_dir);
 
     // 1. Stashed changes check
     if (refs.hasStash(io, git_dir)) {
@@ -137,73 +105,79 @@ pub fn getGitStatusForDir(
     if (index_res.conflicted) info.conflicted = true;
     if (index_res.staged) info.staged = true;
 
-    // 5. Untracked files scan with deep directory traversal and .gitignore support
+    // 5. Untracked files scan with deep BFS directory traversal and .gitignore support
     var gitignore = GitIgnore{};
     var gitignore_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var gi_content_buf: [16384]u8 = undefined;
     if (std.fmt.bufPrint(&gitignore_path_buf, "{s}/.gitignore", .{repo_root}) catch null) |gi_path| {
-        var gi_content_buf: [4096]u8 = undefined;
         if (fs.readSmallFile(io, gi_path, &gi_content_buf)) |content| {
             gitignore = GitIgnore.parse(content);
         }
     }
 
-    var root_dir = if (std.fs.path.isAbsolute(repo_root))
-        std.Io.Dir.openDirAbsolute(io, repo_root, .{ .iterate = true }) catch null
-    else
-        std.Io.Dir.cwd().openDir(io, repo_root, .{ .iterate = true }) catch null;
+    var idx_scanner = index.GitIndexScanner.open(io, git_dir);
+    defer if (idx_scanner) |*s| s.close();
 
-    if (root_dir) |*dir_handle| {
-        defer dir_handle.close(io);
-        var it = dir_handle.iterate();
-        var dir_entries_scanned: usize = 0;
+    const MaxQueue = 32;
+    var queue_buf: [MaxQueue][std.fs.max_path_bytes]u8 = undefined;
+    var queue_len: [MaxQueue]usize = undefined;
+    var q_head: usize = 0;
+    var q_tail: usize = 0;
 
+    queue_len[0] = 0;
+    q_tail = 1;
+
+    var total_entries_scanned: usize = 0;
+
+    while (q_head < q_tail and !info.untracked and total_entries_scanned < 1000) {
+        const cur_rel = queue_buf[q_head][0..queue_len[q_head]];
+        q_head += 1;
+
+        var full_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const full_dir_path = if (cur_rel.len == 0)
+            repo_root
+        else
+            std.fmt.bufPrint(&full_dir_buf, "{s}/{s}", .{ repo_root, cur_rel }) catch continue;
+
+        var d_handle = if (std.fs.path.isAbsolute(full_dir_path))
+            std.Io.Dir.openDirAbsolute(io, full_dir_path, .{ .iterate = true }) catch continue
+        else
+            std.Io.Dir.cwd().openDir(io, full_dir_path, .{ .iterate = true }) catch continue;
+        defer d_handle.close(io);
+
+        var it = d_handle.iterate();
         while (it.next(io) catch null) |entry| {
-            dir_entries_scanned += 1;
-            if (dir_entries_scanned > 1000) break;
+            total_entries_scanned += 1;
+            if (total_entries_scanned > 1000) break;
 
+            if (cur_rel.len == 0 and (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".gitignore"))) continue;
             if (std.mem.eql(u8, entry.name, ".git")) continue;
-            if (std.mem.eql(u8, entry.name, ".gitignore")) continue;
+
+            var rel_entry_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const rel_entry = if (cur_rel.len == 0)
+                entry.name
+            else
+                std.fmt.bufPrint(&rel_entry_buf, "{s}/{s}", .{ cur_rel, entry.name }) catch continue;
 
             const is_directory = (entry.kind == .directory);
-            if (gitignore.isIgnored(entry.name, is_directory)) continue;
+            if (gitignore.isIgnored(rel_entry, is_directory)) continue;
 
             if (!is_directory) {
-                if (!index.isPathInIndex(io, git_dir, entry.name, false)) {
+                const in_idx = if (idx_scanner) |*s| s.contains(rel_entry, false) else false;
+                if (!in_idx) {
                     info.untracked = true;
                     break;
                 }
             } else {
-                // Check if directory prefix exists in index
-                if (!index.isPathInIndex(io, git_dir, entry.name, true)) {
+                const in_idx = if (idx_scanner) |*s| s.contains(rel_entry, true) else false;
+                if (!in_idx) {
                     info.untracked = true;
                     break;
                 }
-
-                // If directory is tracked, check inside for untracked files
-                var sub_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-                if (std.fmt.bufPrint(&sub_dir_buf, "{s}/{s}", .{ repo_root, entry.name }) catch null) |sub_path| {
-                    if (std.Io.Dir.openDirAbsolute(io, sub_path, .{ .iterate = true })) |sub_dir_handle| {
-                        var sd = sub_dir_handle;
-                        defer sd.close(io);
-                        var sub_it = sd.iterate();
-                        var sub_entries_scanned: usize = 0;
-
-                        while (sub_it.next(io) catch null) |sub_entry| {
-                            sub_entries_scanned += 1;
-                            if (sub_entries_scanned > 200) break;
-
-                            var rel_child_buf: [std.fs.max_path_bytes]u8 = undefined;
-                            if (std.fmt.bufPrint(&rel_child_buf, "{s}/{s}", .{ entry.name, sub_entry.name }) catch null) |rel_child| {
-                                const sub_is_dir = (sub_entry.kind == .directory);
-                                if (gitignore.isIgnored(rel_child, sub_is_dir)) continue;
-                                if (!index.isPathInIndex(io, git_dir, rel_child, sub_is_dir)) {
-                                    info.untracked = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (info.untracked) break;
-                    } else |_| {}
+                if (q_tail < MaxQueue) {
+                    @memcpy(queue_buf[q_tail][0..rel_entry.len], rel_entry);
+                    queue_len[q_tail] = rel_entry.len;
+                    q_tail += 1;
                 }
             }
         }

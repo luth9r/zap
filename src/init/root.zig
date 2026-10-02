@@ -111,6 +111,6 @@ test "unit: matrix fixture: all modules on all shells" {
     }
 }
 
-test {
+test "unit: init refAllDecls" {
     std.testing.refAllDecls(@This());
 }

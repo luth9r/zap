@@ -126,3 +126,10 @@ disabled = false
 format = "[$symbol]($style) "
 style = "bold white"
 disabled = false
+
+[zig_lang]
+format = "[$symbol$version]($style) "
+symbol = "↯ "
+style = "bold yellow"
+version = ""
+disabled = false

@@ -66,6 +66,78 @@ fn skipEntryPadding(reader: anytype, header_len: usize, name_len: usize) bool {
     return true;
 }
 
+pub const GitIndexScanner = struct {
+    file: std.Io.File,
+    stream_buf: [4096]u8 = undefined,
+    entry_count: u32 = 0,
+    version: u32 = 2,
+    io: std.Io,
+
+    pub fn open(io: std.Io, git_dir: []const u8) ?GitIndexScanner {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const index_path = std.fmt.bufPrint(&path_buf, "{s}/index", .{git_dir}) catch return null;
+        const file = std.Io.Dir.openFileAbsolute(io, index_path, .{}) catch return null;
+        var self = GitIndexScanner{ .file = file, .io = io };
+        var reader = self.file.reader(io, &self.stream_buf);
+        var header_buf: [12]u8 = undefined;
+        if (!readExact(&reader, &header_buf)) {
+            self.file.close(io);
+            return null;
+        }
+        if (!std.mem.eql(u8, header_buf[0..4], "DIRC")) {
+            self.file.close(io);
+            return null;
+        }
+        self.version = std.mem.readInt(u32, header_buf[4..8][0..4], .big);
+        self.entry_count = std.mem.readInt(u32, header_buf[8..12][0..4], .big);
+        return self;
+    }
+
+    pub fn close(self: *GitIndexScanner) void {
+        self.file.close(self.io);
+    }
+
+    pub fn contains(self: *GitIndexScanner, target_path: []const u8, is_dir: bool) bool {
+        var reader = self.file.reader(self.io, &self.stream_buf);
+        reader.seekTo(12) catch return false;
+        var i: u32 = 0;
+        while (i < self.entry_count) : (i += 1) {
+            var entry_fixed: [62]u8 = undefined;
+            if (!readExact(&reader, &entry_fixed)) break;
+            const flags = std.mem.readInt(u16, entry_fixed[60..62][0..2], .big);
+            const is_extended = (flags & (1 << 14)) != 0;
+            var header_len: usize = 62;
+            if (is_extended) {
+                header_len = 64;
+                var ext_extra: [2]u8 = undefined;
+                if (!readExact(&reader, &ext_extra)) break;
+            }
+
+            var name_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const entry_name = readEntryName(&reader, &name_buf) orelse break;
+
+            if (is_dir) {
+                if (std.mem.startsWith(u8, entry_name, target_path)) {
+                    if (entry_name.len == target_path.len or entry_name[target_path.len] == '/') {
+                        return true;
+                    }
+                }
+            } else {
+                if (std.mem.eql(u8, entry_name, target_path)) {
+                    return true;
+                }
+            }
+
+            if (!is_dir and std.mem.order(u8, entry_name, target_path) == .gt) {
+                return false;
+            }
+
+            if (!skipEntryPadding(&reader, header_len, entry_name.len)) break;
+        }
+        return false;
+    }
+};
+
 /// Checks if a file or directory prefix exists in binary .git/index.
 /// Uses the fact that Git index entries are sorted lexicographically for early exit.
 pub fn isPathInIndex(
@@ -74,65 +146,9 @@ pub fn isPathInIndex(
     target_path: []const u8,
     is_dir: bool,
 ) bool {
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const index_path = std.fmt.bufPrint(&path_buf, "{s}/index", .{git_dir}) catch return false;
-
-    var file = std.Io.Dir.openFileAbsolute(io, index_path, .{}) catch return false;
-    defer file.close(io);
-
-    var stream_buf: [4096]u8 = undefined;
-    var reader = file.reader(io, &stream_buf);
-
-    // Git Index Header (12 bytes):
-    // 0..4: 'DIRC' (Directory Cache) magic signature
-    // 4..8: 32-bit big-endian version (2, 3, or 4)
-    // 8..12: 32-bit big-endian number of index entries
-    var header_buf: [12]u8 = undefined;
-    if (!readExact(&reader, &header_buf)) return false;
-    if (!std.mem.eql(u8, header_buf[0..4], "DIRC")) return false;
-
-    const entry_count = std.mem.readInt(u32, header_buf[8..12][0..4], .big);
-
-    var i: u32 = 0;
-    while (i < entry_count) : (i += 1) {
-        var entry_fixed: [62]u8 = undefined;
-        if (!readExact(&reader, &entry_fixed)) break;
-
-        // Flags: bit 14 indicates extended entry (64 bytes header instead of 62)
-        const flags = std.mem.readInt(u16, entry_fixed[60..62][0..2], .big);
-        const is_extended = (flags & (1 << 14)) != 0;
-        var header_len: usize = 62;
-        if (is_extended) {
-            header_len = 64;
-            var ext_extra: [2]u8 = undefined;
-            if (!readExact(&reader, &ext_extra)) break;
-        }
-
-        var name_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const entry_name = readEntryName(&reader, &name_buf) orelse break;
-
-        if (is_dir) {
-            if (std.mem.startsWith(u8, entry_name, target_path)) {
-                if (entry_name.len == target_path.len or entry_name[target_path.len] == '/') {
-                    return true;
-                }
-            }
-        } else {
-            if (std.mem.eql(u8, entry_name, target_path)) {
-                return true;
-            }
-        }
-
-        // Optimization: Git index entries are strictly sorted alphabetically.
-        // If the current entry name is greater than target_path, the file is absent.
-        if (!is_dir and std.mem.order(u8, entry_name, target_path) == .gt) {
-            return false;
-        }
-
-        if (!skipEntryPadding(&reader, header_len, entry_name.len)) break;
-    }
-
-    return false;
+    var scanner = GitIndexScanner.open(io, git_dir) orelse return false;
+    defer scanner.close();
+    return scanner.contains(target_path, is_dir);
 }
 
 /// Scans the binary extension blocks at the tail of .git/index (after all file entries).

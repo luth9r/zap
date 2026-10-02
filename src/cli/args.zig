@@ -103,11 +103,17 @@ pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Comma
             return Command{ .version = {} };
         } else if (std.mem.eql(u8, arg, "--status") or std.mem.eql(u8, arg, "-s")) {
             if (args.next()) |val| {
-                res.prompt.status_code = std.fmt.parseInt(u8, val, 10) catch 0;
+                res.prompt.status_code = std.fmt.parseInt(u8, val, 10) catch {
+                    printInvalidIntError(init.io, "--status", val);
+                    return error.InvalidArgs;
+                };
             }
         } else if (std.mem.eql(u8, arg, "--duration") or std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--cmd-duration")) {
             if (args.next()) |val| {
-                res.prompt.cmd_duration = std.fmt.parseInt(u64, val, 10) catch 0;
+                res.prompt.cmd_duration = std.fmt.parseInt(u64, val, 10) catch {
+                    printInvalidIntError(init.io, "--duration", val);
+                    return error.InvalidArgs;
+                };
             }
         } else if (std.mem.eql(u8, arg, "--shell") or std.mem.eql(u8, arg, "-sh")) {
             if (args.next()) |val| {
@@ -119,10 +125,16 @@ pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Comma
             }
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             if (positional_idx == 0) {
-                res.prompt.status_code = std.fmt.parseInt(u8, arg, 10) catch 0;
+                res.prompt.status_code = std.fmt.parseInt(u8, arg, 10) catch {
+                    printInvalidIntError(init.io, "status code", arg);
+                    return error.InvalidArgs;
+                };
                 positional_idx += 1;
             } else if (positional_idx == 1) {
-                res.prompt.cmd_duration = std.fmt.parseInt(u64, arg, 10) catch 0;
+                res.prompt.cmd_duration = std.fmt.parseInt(u64, arg, 10) catch {
+                    printInvalidIntError(init.io, "duration", arg);
+                    return error.InvalidArgs;
+                };
                 positional_idx += 1;
             }
         } else {
@@ -140,6 +152,12 @@ pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Comma
     }
 
     return res;
+}
+
+fn printInvalidIntError(io: std.Io, name: []const u8, val: []const u8) void {
+    var err_buf: [256]u8 = undefined;
+    const err_msg = std.fmt.bufPrint(&err_buf, "✖ Error: invalid integer for {s} '{s}'.\n", .{ name, val }) catch "Error: invalid integer argument.\n";
+    _ = std.Io.File.stderr().writeStreamingAll(io, err_msg) catch {};
 }
 
 const testing = std.testing;
@@ -162,4 +180,13 @@ test "integration: unknown command produces error and non-zero exit" {
     try testing.expectEqual(@as(u8, 1), res.exit_code);
     try Harness.expectContains(res.stderr, "unknown command 'foobar_unknown_cmd'");
     try Harness.expectContains(res.stderr, "Run 'zap --help' for available commands");
+}
+
+test "integration: invalid integer argument produces error and non-zero exit" {
+    var h = try Harness.create(testing.allocator);
+    defer h.destroy();
+
+    const res = try h.execZapAllowFail(&.{ "prompt", "--status", "not_a_number" });
+    try testing.expectEqual(@as(u8, 1), res.exit_code);
+    try Harness.expectContains(res.stderr, "invalid integer for --status 'not_a_number'");
 }

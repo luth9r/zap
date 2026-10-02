@@ -1,0 +1,166 @@
+name: CI & Build Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Zig 0.16
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Verify Zig version
+        run: zig version
+
+      - name: Run test suite
+        run: zig build test --summary all
+
+  build:
+    name: Build (${{ matrix.target.name }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: x86_64-linux
+            zig_target: x86_64-linux-musl
+            os: linux
+            arch: x86_64
+            bin: zap
+            archive_ext: tar.gz
+          - name: aarch64-linux
+            zig_target: aarch64-linux-musl
+            os: linux
+            arch: aarch64
+            bin: zap
+            archive_ext: tar.gz
+          - name: x86_64-macos
+            zig_target: x86_64-macos
+            os: macos
+            arch: x86_64
+            bin: zap
+            archive_ext: tar.gz
+          - name: aarch64-macos
+            zig_target: aarch64-macos
+            os: macos
+            arch: aarch64
+            bin: zap
+            archive_ext: tar.gz
+          - name: x86_64-windows
+            zig_target: x86_64-windows-gnu
+            os: windows
+            arch: x86_64
+            bin: zap.exe
+            archive_ext: zip
+          - name: aarch64-windows
+            zig_target: aarch64-windows-gnu
+            os: windows
+            arch: aarch64
+            bin: zap.exe
+            archive_ext: zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Zig 0.16
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Compile zap (${{ matrix.target.zig_target }})
+        run: |
+          zig build -Dtarget=${{ matrix.target.zig_target }} -Doptimize=ReleaseFast
+
+      - name: Package archive
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [[ "${VERSION}" != v* ]]; then
+            VERSION="v0.1.0"
+          fi
+          
+          PKG_NAME="zap-${VERSION}-${{ matrix.target.name }}"
+          DIST_DIR="dist/${PKG_NAME}"
+          mkdir -p "${DIST_DIR}"
+          
+          cp "zig-out/bin/${{ matrix.target.bin }}" "${DIST_DIR}/"
+          cp README.md LICENSE zap.schema.json example.config.toml "${DIST_DIR}/"
+          
+          mkdir -p release-artifacts
+          if [[ "${{ matrix.target.archive_ext }}" == "tar.gz" ]]; then
+            tar -czvf "release-artifacts/${PKG_NAME}.tar.gz" -C dist "${PKG_NAME}"
+            echo "ARCHIVE_PATH=release-artifacts/${PKG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+            echo "ARCHIVE_NAME=${PKG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+          else
+            (cd dist && zip -r "../release-artifacts/${PKG_NAME}.zip" "${PKG_NAME}")
+            echo "ARCHIVE_PATH=release-artifacts/${PKG_NAME}.zip" >> $GITHUB_OUTPUT
+            echo "ARCHIVE_NAME=${PKG_NAME}.zip" >> $GITHUB_OUTPUT
+          fi
+          
+          cd release-artifacts
+          sha256sum "${PKG_NAME}.${{ matrix.target.archive_ext }}" > "${PKG_NAME}.${{ matrix.target.archive_ext }}.sha256"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.ARCHIVE_NAME }}
+          path: release-artifacts/*
+
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-download
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-dist
+          find release-download -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-dist/ \;
+          cd release-dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt || true
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

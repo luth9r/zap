@@ -153,40 +153,48 @@ pub const Style = struct {
     }
 
     fn parseNamedColor(name: []const u8, is_bg: bool) ?ColorType {
-        // Standard colors
-        if (std.ascii.eqlIgnoreCase(name, "black")) return .{ .ansi_16 = if (is_bg) 40 else 30 };
-        if (std.ascii.eqlIgnoreCase(name, "red")) return .{ .ansi_16 = if (is_bg) 41 else 31 };
-        if (std.ascii.eqlIgnoreCase(name, "green")) return .{ .ansi_16 = if (is_bg) 42 else 32 };
-        if (std.ascii.eqlIgnoreCase(name, "yellow")) return .{ .ansi_16 = if (is_bg) 43 else 33 };
-        if (std.ascii.eqlIgnoreCase(name, "blue")) return .{ .ansi_16 = if (is_bg) 44 else 34 };
-        if (std.ascii.eqlIgnoreCase(name, "magenta") or std.ascii.eqlIgnoreCase(name, "purple")) return .{ .ansi_16 = if (is_bg) 45 else 35 };
-        if (std.ascii.eqlIgnoreCase(name, "cyan")) return .{ .ansi_16 = if (is_bg) 46 else 36 };
-        if (std.ascii.eqlIgnoreCase(name, "white")) return .{ .ansi_16 = if (is_bg) 47 else 37 };
+        if (name.len == 0) return null;
+        const first = std.ascii.toLower(name[0]);
 
-        // Bright colors
-        if (std.ascii.eqlIgnoreCase(name, "bright-black") or std.ascii.eqlIgnoreCase(name, "bright_black") or std.ascii.eqlIgnoreCase(name, "gray") or std.ascii.eqlIgnoreCase(name, "grey")) {
-            return .{ .ansi_16 = if (is_bg) 100 else 90 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-red") or std.ascii.eqlIgnoreCase(name, "bright_red")) {
-            return .{ .ansi_16 = if (is_bg) 101 else 91 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-green") or std.ascii.eqlIgnoreCase(name, "bright_green")) {
-            return .{ .ansi_16 = if (is_bg) 102 else 92 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-yellow") or std.ascii.eqlIgnoreCase(name, "bright_yellow")) {
-            return .{ .ansi_16 = if (is_bg) 103 else 93 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-blue") or std.ascii.eqlIgnoreCase(name, "bright_blue")) {
-            return .{ .ansi_16 = if (is_bg) 104 else 94 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-magenta") or std.ascii.eqlIgnoreCase(name, "bright_magenta") or std.ascii.eqlIgnoreCase(name, "bright-purple") or std.ascii.eqlIgnoreCase(name, "bright_purple")) {
-            return .{ .ansi_16 = if (is_bg) 105 else 95 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-cyan") or std.ascii.eqlIgnoreCase(name, "bright_cyan")) {
-            return .{ .ansi_16 = if (is_bg) 106 else 96 };
-        }
-        if (std.ascii.eqlIgnoreCase(name, "bright-white") or std.ascii.eqlIgnoreCase(name, "bright_white")) {
-            return .{ .ansi_16 = if (is_bg) 107 else 97 };
+        switch (first) {
+            'b' => {
+                if (std.ascii.eqlIgnoreCase(name, "black")) return .{ .ansi_16 = if (is_bg) 40 else 30 };
+                if (std.ascii.eqlIgnoreCase(name, "blue")) return .{ .ansi_16 = if (is_bg) 44 else 34 };
+                if (std.ascii.startsWithIgnoreCase(name, "bright-") or std.ascii.startsWithIgnoreCase(name, "bright_")) {
+                    const sub = name[7..];
+                    if (std.ascii.eqlIgnoreCase(sub, "black")) return .{ .ansi_16 = if (is_bg) 100 else 90 };
+                    if (std.ascii.eqlIgnoreCase(sub, "red")) return .{ .ansi_16 = if (is_bg) 101 else 91 };
+                    if (std.ascii.eqlIgnoreCase(sub, "green")) return .{ .ansi_16 = if (is_bg) 102 else 92 };
+                    if (std.ascii.eqlIgnoreCase(sub, "yellow")) return .{ .ansi_16 = if (is_bg) 103 else 93 };
+                    if (std.ascii.eqlIgnoreCase(sub, "blue")) return .{ .ansi_16 = if (is_bg) 104 else 94 };
+                    if (std.ascii.eqlIgnoreCase(sub, "magenta") or std.ascii.eqlIgnoreCase(sub, "purple")) return .{ .ansi_16 = if (is_bg) 105 else 95 };
+                    if (std.ascii.eqlIgnoreCase(sub, "cyan")) return .{ .ansi_16 = if (is_bg) 106 else 96 };
+                    if (std.ascii.eqlIgnoreCase(sub, "white")) return .{ .ansi_16 = if (is_bg) 107 else 97 };
+                }
+            },
+            'r' => {
+                if (std.ascii.eqlIgnoreCase(name, "red")) return .{ .ansi_16 = if (is_bg) 41 else 31 };
+            },
+            'g' => {
+                if (std.ascii.eqlIgnoreCase(name, "green")) return .{ .ansi_16 = if (is_bg) 42 else 32 };
+                if (std.ascii.eqlIgnoreCase(name, "gray") or std.ascii.eqlIgnoreCase(name, "grey")) return .{ .ansi_16 = if (is_bg) 100 else 90 };
+            },
+            'y' => {
+                if (std.ascii.eqlIgnoreCase(name, "yellow")) return .{ .ansi_16 = if (is_bg) 43 else 33 };
+            },
+            'm' => {
+                if (std.ascii.eqlIgnoreCase(name, "magenta")) return .{ .ansi_16 = if (is_bg) 45 else 35 };
+            },
+            'p' => {
+                if (std.ascii.eqlIgnoreCase(name, "purple")) return .{ .ansi_16 = if (is_bg) 45 else 35 };
+            },
+            'c' => {
+                if (std.ascii.eqlIgnoreCase(name, "cyan")) return .{ .ansi_16 = if (is_bg) 46 else 36 };
+            },
+            'w' => {
+                if (std.ascii.eqlIgnoreCase(name, "white")) return .{ .ansi_16 = if (is_bg) 47 else 37 };
+            },
+            else => {},
         }
 
         return null;

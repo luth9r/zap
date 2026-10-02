@@ -1,12 +1,12 @@
 const std = @import("std");
 
-/// Checks if a file exists at the given absolute path.
+/// Checks if a file exists at the given path using fast access check.
 pub fn fileExists(io: std.Io, path: []const u8) bool {
-    if (std.Io.Dir.openFileAbsolute(io, path, .{})) |f| {
-        var file = f;
-        file.close(io);
-        return true;
-    } else |_| return false;
+    if (std.fs.path.isAbsolute(path)) {
+        if (std.Io.Dir.accessAbsolute(io, path, .{})) |_| return true else |_| return false;
+    } else {
+        if (std.Io.Dir.cwd().access(io, path, .{})) |_| return true else |_| return false;
+    }
 }
 
 /// Checks if any of the given relative subpaths exist within base_dir.
@@ -17,6 +17,63 @@ pub fn anySubpathExists(io: std.Io, base_dir: []const u8, comptime subpaths: []c
             if (fileExists(io, p)) return true;
         } else |_| {}
     }
+    return false;
+}
+
+/// Checks if any file with the specified extensions exists in the given directory.
+pub fn hasFileWithExtension(
+    io: std.Io,
+    dir_path: []const u8,
+    comptime extensions: []const []const u8,
+) bool {
+    if (extensions.len == 0) return false;
+    var dir = if (std.fs.path.isAbsolute(dir_path))
+        std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch null
+    else
+        std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch null;
+    if (dir) |*d| {
+        defer d.close(io);
+        var iter = d.iterate();
+        while (iter.next(io) catch null) |entry| {
+            inline for (extensions) |ext| {
+                if (std.mem.endsWith(u8, entry.name, ext)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/// Traverses parent directories upwards starting from start_dir up to repo_root, home_dir, or max_depth,
+/// checking if any candidate manifest files exist.
+pub fn scanParentDirsForFiles(
+    io: std.Io,
+    start_dir: []const u8,
+    home_dir: []const u8,
+    repo_root: ?[]const u8,
+    comptime files: []const []const u8,
+    max_depth: usize,
+) bool {
+    if (files.len == 0 or max_depth == 0) return false;
+
+    var curr_dir = std.fs.path.dirname(start_dir);
+    var depth: usize = 0;
+    while (curr_dir) |p| : (depth += 1) {
+        if (depth >= max_depth) break;
+
+        if (anySubpathExists(io, p, files)) {
+            return true;
+        }
+
+        if (repo_root) |root| {
+            if (std.mem.eql(u8, p, root) or !std.mem.startsWith(u8, p, root)) break;
+        }
+        if (std.mem.eql(u8, p, home_dir) or std.mem.eql(u8, p, "/") or p.len == 0) break;
+
+        curr_dir = std.fs.path.dirname(p);
+    }
+
     return false;
 }
 
@@ -55,4 +112,9 @@ pub fn writeFileAbsolute(io: std.Io, path: []const u8, content: []const u8) !voi
     var file = try std.Io.Dir.createFileAbsolute(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, content);
+}
+
+test "unit: fs.anySubpathExists on non-existent path returns false" {
+    const io = std.testing.io;
+    try std.testing.expect(!anySubpathExists(io, "/nonexistent_folder_xyz_123", &.{"file.txt"}));
 }

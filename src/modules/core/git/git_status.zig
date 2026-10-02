@@ -638,6 +638,27 @@ test "integration: git_status detects untracked file in deep subdirectory" {
     try Harness.expectVisibleText(out, "?");
 }
 
+test "integration: git_status detects untracked file 4 levels deep in tracked tree" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("a/b/c/tracked.zig", "pub fn main() {}");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Add untracked file inside deeply nested directory a/b/c/d/deep.txt
+    try h.writeFile("a/b/c/d/deep.txt", "deep untracked content");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "?");
+}
+
 test "integration: git_status stress test with 500+ files and nested directory tree" {
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();

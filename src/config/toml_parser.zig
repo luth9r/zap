@@ -8,16 +8,8 @@ pub fn loadConfigFile(
     config: *config_mod.Config,
     content_buf: []u8,
 ) void {
-    const EnvAdapter = struct {
-        var map_ptr: *const std.process.Environ.Map = undefined;
-        fn get(key: []const u8) ?[]const u8 {
-            return map_ptr.get(key);
-        }
-    };
-    EnvAdapter.map_ptr = environ_map;
-
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const config_path = resolveExistingConfigPath(io, &path_buf, EnvAdapter.get) orelse return;
+    const config_path = resolveExistingConfigPath(io, &path_buf, environ_map) orelse return;
 
     const file = if (std.fs.path.isAbsolute(config_path))
         std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return
@@ -105,6 +97,14 @@ pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
 
             if (std.mem.eql(u8, key, "$schema")) continue;
 
+            // Support TOML inline tables: key = { k1 = "v1", k2 = 123 }
+            if (val.len >= 2 and val[0] == '{' and val[val.len - 1] == '}') {
+                const inner = std.mem.trim(u8, val[1 .. val.len - 1], " \t\r");
+                const target_sec = if (current_section) |s| s else key;
+                parseInlineTable(config, target_sec, inner);
+                continue;
+            }
+
             if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
                 val = extractMultilineValue(val, content, &line_it);
             } else {
@@ -113,6 +113,50 @@ pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
 
             applyValue(config, current_section, key, val);
         }
+    }
+}
+
+fn parseInlineTable(config: *config_mod.Config, target_section: []const u8, content_inside: []const u8) void {
+    var pair_start: usize = 0;
+    var i: usize = 0;
+    var in_quotes: ?u8 = null;
+
+    while (i < content_inside.len) : (i += 1) {
+        const c = content_inside[i];
+        if (in_quotes) |q| {
+            if (c == '\\' and i + 1 < content_inside.len) {
+                i += 1;
+                continue;
+            }
+            if (c == q) {
+                in_quotes = null;
+            }
+        } else {
+            if (c == '"' or c == '\'') {
+                in_quotes = c;
+            } else if (c == ',') {
+                parseAndApplyPair(config, target_section, content_inside[pair_start..i]);
+                pair_start = i + 1;
+            }
+        }
+    }
+
+    if (pair_start < content_inside.len) {
+        parseAndApplyPair(config, target_section, content_inside[pair_start..]);
+    }
+}
+
+fn parseAndApplyPair(config: *config_mod.Config, target_section: []const u8, item: []const u8) void {
+    const trimmed_item = std.mem.trim(u8, item, " \t\r");
+    if (trimmed_item.len == 0) return;
+    if (std.mem.indexOfScalar(u8, trimmed_item, '=')) |eq_idx| {
+        var k = std.mem.trim(u8, trimmed_item[0..eq_idx], " \t");
+        var v = std.mem.trim(u8, trimmed_item[eq_idx + 1 ..], " \t");
+        if (k.len >= 2 and k[0] == '"' and k[k.len - 1] == '"') {
+            k = k[1 .. k.len - 1];
+        }
+        v = unquoteValue(v);
+        applyValue(config, target_section, k, v);
     }
 }
 
@@ -170,30 +214,41 @@ fn applyValue(config: *config_mod.Config, section: ?[]const u8, key: []const u8,
     }
 }
 
+fn lookupEnv(lookup_env: anytype, key: []const u8) ?[]const u8 {
+    const T = @TypeOf(lookup_env);
+    if (comptime @typeInfo(T) == .pointer and @hasDecl(@typeInfo(T).pointer.child, "get")) {
+        return lookup_env.get(key);
+    } else if (comptime @typeInfo(T) == .@"struct" and @hasDecl(T, "get")) {
+        return lookup_env.get(key);
+    } else {
+        return lookup_env(key);
+    }
+}
+
 pub fn resolveConfigPathBuf(
     buf: *[std.fs.max_path_bytes]u8,
-    lookup_env: *const fn ([]const u8) ?[]const u8,
+    lookup_env: anytype,
 ) ?[]const u8 {
     // User-defined configuration path via environment variable
-    if (lookup_env("ZAP_CONFIG")) |custom| {
+    if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
         return custom;
     }
 
     // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/zap.toml)
-    if (lookup_env("XDG_CONFIG_HOME")) |xdg| {
+    if (lookupEnv(lookup_env, "XDG_CONFIG_HOME")) |xdg| {
         return std.fmt.bufPrint(buf, "{s}/zap/zap.toml", .{xdg}) catch null;
     }
 
     // Windows-specific configuration path support (%APPDATA%\zap\zap.toml)
     if (builtin.os.tag == .windows) {
-        if (lookup_env("APPDATA")) |appdata| {
+        if (lookupEnv(lookup_env, "APPDATA")) |appdata| {
             return std.fmt.bufPrint(buf, "{s}\\zap\\zap.toml", .{appdata}) catch null;
         }
     }
 
     // Universal fallback (~/.config/zap/zap.toml)
     const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
-    if (lookup_env(home_env)) |home| {
+    if (lookupEnv(lookup_env, home_env)) |home| {
         const sep = if (builtin.os.tag == .windows) "\\" else "/";
         return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}zap.toml", .{ home, sep, sep, sep }) catch null;
     }
@@ -204,15 +259,15 @@ pub fn resolveConfigPathBuf(
 pub fn resolveExistingConfigPath(
     io: std.Io,
     buf: *[std.fs.max_path_bytes]u8,
-    lookup_env: *const fn ([]const u8) ?[]const u8,
+    lookup_env: anytype,
 ) ?[]const u8 {
-    if (lookup_env("ZAP_CONFIG")) |custom| {
+    if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
         return custom;
     }
 
     const candidates = [_][]const u8{ "zap.toml", "config.toml" };
 
-    if (lookup_env("XDG_CONFIG_HOME")) |xdg| {
+    if (lookupEnv(lookup_env, "XDG_CONFIG_HOME")) |xdg| {
         for (candidates) |filename| {
             if (std.fmt.bufPrint(buf, "{s}/zap/{s}", .{ xdg, filename })) |candidate| {
                 if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
@@ -225,7 +280,7 @@ pub fn resolveExistingConfigPath(
     }
 
     if (builtin.os.tag == .windows) {
-        if (lookup_env("APPDATA")) |appdata| {
+        if (lookupEnv(lookup_env, "APPDATA")) |appdata| {
             for (candidates) |filename| {
                 if (std.fmt.bufPrint(buf, "{s}\\zap\\{s}", .{ appdata, filename })) |candidate| {
                     if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
@@ -239,7 +294,7 @@ pub fn resolveExistingConfigPath(
     }
 
     const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
-    if (lookup_env(home_env)) |home| {
+    if (lookupEnv(lookup_env, home_env)) |home| {
         const sep = if (builtin.os.tag == .windows) "\\" else "/";
         for (candidates) |filename| {
             if (std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}{s}", .{ home, sep, sep, sep, filename })) |candidate| {
@@ -448,5 +503,33 @@ test "unit: parse os section" {
     try std.testing.expectEqual(false, cfg.os.disabled);
     try std.testing.expectEqualStrings("bold yellow", cfg.os.style);
     try std.testing.expectEqualStrings("", cfg.os.symbol);
+}
+
+test "unit: parse inline tables in toml" {
+    const toml_text =
+        \\directory = { truncation_length = 4, home_symbol = "HOME" }
+        \\character = { success_symbol = ">>", disabled = true }
+    ;
+
+    var cfg: config_mod.Config = config_mod.defaultConfig();
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqual(@as(usize, 4), cfg.directory.truncation_length);
+    try std.testing.expectEqualStrings("HOME", cfg.directory.home_symbol);
+    try std.testing.expectEqualStrings(">>", cfg.character.success_symbol);
+    try std.testing.expectEqual(true, cfg.character.disabled);
+}
+
+test "unit: parse inline table with commas inside quoted strings" {
+    const toml_text =
+        \\directory = { format = "[$path](bold, green)", home_symbol = "H,O,M,E", style = "cyan" }
+    ;
+
+    var cfg: config_mod.Config = config_mod.defaultConfig();
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqualStrings("[$path](bold, green)", cfg.directory.format);
+    try std.testing.expectEqualStrings("H,O,M,E", cfg.directory.home_symbol);
+    try std.testing.expectEqualStrings("cyan", cfg.directory.style);
 }
 

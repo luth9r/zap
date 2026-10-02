@@ -3,7 +3,6 @@ const std = @import("std");
 pub const git = @import("git/root.zig");
 
 // Re-export all declarations from git/root.zig
-pub const GitRepo = git.GitRepo;
 pub const GitStatusInfo = git.GitStatusInfo;
 pub const GitCommitResult = git.GitCommitResult;
 pub const GitStateType = git.GitStateType;
@@ -11,6 +10,7 @@ pub const GitStateResult = git.GitStateResult;
 
 pub const findGitDir = git.findGitDir;
 pub const findRepoRoot = git.findRepoRoot;
+pub const gitDirToRepoRoot = git.gitDirToRepoRoot;
 pub const parseGitDirPointer = git.parseGitDirPointer;
 pub const fileExists = git.fileExists;
 pub const anySubpathExists = git.anySubpathExists;

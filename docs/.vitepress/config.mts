@@ -44,7 +44,7 @@ export default defineConfig({
         ]
       },
       {
-        text: 'Modules',
+        text: 'Core Modules',
         collapsed: false,
         items: [
           { text: 'directory', link: '/config/directory' },
@@ -55,6 +55,13 @@ export default defineConfig({
           { text: 'cmd_duration', link: '/config/cmd-duration' },
           { text: 'character', link: '/config/character' },
           { text: 'os', link: '/config/os' }
+        ]
+      },
+      {
+        text: 'Language Modules',
+        collapsed: false,
+        items: [
+          { text: 'zig_lang', link: '/config/zig-lang' }
         ]
       }
     ],
