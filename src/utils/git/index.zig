@@ -239,6 +239,7 @@ pub fn scanGitIndex(
         var entry_fixed: [62]u8 = undefined;
         if (!readExact(&reader, &entry_fixed)) break;
 
+        const mode = std.mem.readInt(u32, entry_fixed[24..28][0..4], .big);
         const file_size = std.mem.readInt(u32, entry_fixed[36..40][0..4], .big);
         const flags = std.mem.readInt(u16, entry_fixed[60..62][0..2], .big);
 
@@ -263,8 +264,9 @@ pub fn scanGitIndex(
         if (root_dir) |dir| {
             if (dir.statFile(io, entry_name, .{})) |st| {
                 const on_disk_size = st.size;
+                const is_regular_file = (mode & 0o170000) == 0o100000;
 
-                if (on_disk_size != file_size) {
+                if (is_regular_file and on_disk_size != file_size) {
                     result.modified = true;
                 }
             } else |err| switch (err) {
