@@ -33,3 +33,4 @@ AGENTS.md
 scratch.zig
 update_refs.zig
 
+bench_stress.sh

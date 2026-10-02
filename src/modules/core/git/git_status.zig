@@ -83,6 +83,35 @@ pub fn formatAllStatus(
     return buf[0..pos];
 }
 
+/// Formats a count template string by replacing `$count`, `$ahead`, and `$behind` placeholders.
+fn formatCountTemplate(
+    buf: []u8,
+    template: []const u8,
+    ahead: usize,
+    behind: usize,
+) []const u8 {
+    var pos: usize = 0;
+    const writer = BufferWriter.init(buf, &pos);
+    var i: usize = 0;
+    while (i < template.len) {
+        if (std.mem.startsWith(u8, template[i..], "$ahead")) {
+            writer.print("{d}", .{ahead}) catch {};
+            i += "$ahead".len;
+        } else if (std.mem.startsWith(u8, template[i..], "$behind")) {
+            writer.print("{d}", .{behind}) catch {};
+            i += "$behind".len;
+        } else if (std.mem.startsWith(u8, template[i..], "$count")) {
+            const count = if (ahead > 0) ahead else behind;
+            writer.print("{d}", .{count}) catch {};
+            i += "$count".len;
+        } else {
+            writer.writeByte(template[i]) catch {};
+            i += 1;
+        }
+    }
+    return buf[0..pos];
+}
+
 /// Formats ahead/behind count string into a buffer.
 pub fn formatAheadBehind(
     buf: []u8,
@@ -91,10 +120,19 @@ pub fn formatAheadBehind(
     behind: usize,
 ) []const u8 {
     if (ahead > 0 and behind > 0) {
+        if (std.mem.indexOf(u8, config.diverged, "$ahead") != null or std.mem.indexOf(u8, config.diverged, "$behind") != null) {
+            return formatCountTemplate(buf, config.diverged, ahead, behind);
+        }
         return std.fmt.bufPrint(buf, "{s}{d} {d}", .{ config.diverged, ahead, behind }) catch "";
     } else if (ahead > 0) {
+        if (std.mem.indexOf(u8, config.ahead, "$count") != null or std.mem.indexOf(u8, config.ahead, "$ahead") != null) {
+            return formatCountTemplate(buf, config.ahead, ahead, 0);
+        }
         return std.fmt.bufPrint(buf, "{s}{d}", .{ config.ahead, ahead }) catch "";
     } else if (behind > 0) {
+        if (std.mem.indexOf(u8, config.behind, "$count") != null or std.mem.indexOf(u8, config.behind, "$behind") != null) {
+            return formatCountTemplate(buf, config.behind, 0, behind);
+        }
         return std.fmt.bufPrint(buf, "{s}{d}", .{ config.behind, behind }) catch "";
     }
     return "";
@@ -159,6 +197,12 @@ test "unit: formatAllStatus and formatAheadBehind" {
     try std.testing.expectEqualStrings("⇡2", formatAheadBehind(&ab_buf, cfg, 2, 0));
     try std.testing.expectEqualStrings("⇣3", formatAheadBehind(&ab_buf, cfg, 0, 3));
     try std.testing.expectEqualStrings("⇕1 2", formatAheadBehind(&ab_buf, cfg, 1, 2));
+
+    // Custom diverged template with arrows
+    const custom_cfg = GitStatusConfig{
+        .diverged = "⇡$ahead⇣$behind",
+    };
+    try std.testing.expectEqualStrings("⇡1⇣2", formatAheadBehind(&ab_buf, custom_cfg, 1, 2));
 }
 
 test "unit: formatAllStatus with conflicted, deleted flags" {
@@ -807,6 +851,35 @@ test "integration: git_status complex diverged counts with large commit historie
     try Harness.expectVisibleText(out, "!");
     try Harness.expectVisibleText(out, "+");
     try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status diverged custom template with arrows" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.git(&.{ "commit", "--allow-empty", "-m", "base" });
+    try h.git(&.{ "branch", "upstream_branch" });
+    try h.git(&.{ "checkout", "-b", "feature" });
+    try h.git(&.{ "branch", "--set-upstream-to=upstream_branch", "feature" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead 1" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead 2" });
+    try h.git(&.{ "checkout", "upstream_branch" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "behind 1" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "behind 2" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "behind 3" });
+    try h.git(&.{ "checkout", "feature" });
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+        \\
+        \\[git_status]
+        \\diverged = "⇡$ahead⇣$behind"
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "⇡2⇣3");
 }
 
 test "integration: git_status deep nested directories with partial ignores and untracked files" {

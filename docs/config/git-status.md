@@ -26,7 +26,7 @@ The `git_status` module displays working tree modifications, untracked files, st
 | `stashed` | `string` | `"$"` | Symbol displayed when stashes exist |
 | `ahead` | `string` | `"⇡"` | Symbol displayed when ahead of upstream |
 | `behind` | `string` | `"⇣"` | Symbol displayed when behind upstream |
-| `diverged` | `string` | `"⇕"` | Symbol displayed when diverged from upstream |
+| `diverged` | `string` | `"⇕"` | Symbol or template when diverged (supports `⇕` or `$ahead`/`$behind` e.g. `"⇡$ahead⇣$behind"`) |
 | `conflicted` | `string` | `"="` | Symbol displayed on merge conflicts |
 | `up_to_date` | `string` | `""` | Symbol displayed when clean and synced |
 | `disabled` | `boolean` | `false` | Disables the git_status module |
