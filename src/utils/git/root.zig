@@ -105,14 +105,28 @@ pub fn getGitStatusForDir(
     if (index_res.conflicted) info.conflicted = true;
     if (index_res.staged) info.staged = true;
 
-    // 5. Untracked files scan with deep BFS directory traversal and .gitignore support
+    // 5. Untracked files scan with deep BFS directory traversal, .git/info/exclude and .gitignore support
     var gitignore = GitIgnore{};
     var gitignore_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     var gi_content_buf: [16384]u8 = undefined;
+    var gi_pos: usize = 0;
+
     if (std.fmt.bufPrint(&gitignore_path_buf, "{s}/.gitignore", .{repo_root}) catch null) |gi_path| {
-        if (fs.readSmallFile(io, gi_path, &gi_content_buf)) |content| {
-            gitignore = GitIgnore.parse(content);
+        if (fs.readSmallFile(io, gi_path, gi_content_buf[gi_pos..])) |content| {
+            gi_pos += content.len;
+            if (gi_pos < gi_content_buf.len) {
+                gi_content_buf[gi_pos] = '\n';
+                gi_pos += 1;
+            }
         }
+    }
+    if (std.fmt.bufPrint(&gitignore_path_buf, "{s}/info/exclude", .{git_dir}) catch null) |ex_path| {
+        if (fs.readSmallFile(io, ex_path, gi_content_buf[gi_pos..])) |content| {
+            gi_pos += content.len;
+        }
+    }
+    if (gi_pos > 0) {
+        gitignore = GitIgnore.parse(gi_content_buf[0..gi_pos]);
     }
 
     var idx_scanner = index.GitIndexScanner.open(io, git_dir);
@@ -145,13 +159,25 @@ pub fn getGitStatusForDir(
             std.Io.Dir.cwd().openDir(io, full_dir_path, .{ .iterate = true }) catch continue;
         defer d_handle.close(io);
 
+        // Check if subdirectory has its own nested .gitignore (e.g. frontend/.gitignore)
+        var dir_gi = GitIgnore{};
+        var dir_gi_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var dir_gi_content_buf: [8192]u8 = undefined;
+        if (cur_rel.len > 0) {
+            if (std.fmt.bufPrint(&dir_gi_path_buf, "{s}/.gitignore", .{full_dir_path}) catch null) |sub_gi_path| {
+                if (fs.readSmallFile(io, sub_gi_path, &dir_gi_content_buf)) |content| {
+                    dir_gi = GitIgnore.parse(content);
+                }
+            }
+        }
+
         var it = d_handle.iterate();
         while (it.next(io) catch null) |entry| {
             total_entries_scanned += 1;
             if (total_entries_scanned > 1000) break;
 
             if (cur_rel.len == 0 and (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".gitignore"))) continue;
-            if (std.mem.eql(u8, entry.name, ".git")) continue;
+            if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".gitignore")) continue;
 
             var rel_entry_buf: [std.fs.max_path_bytes]u8 = undefined;
             const rel_entry = if (cur_rel.len == 0)
@@ -160,24 +186,19 @@ pub fn getGitStatusForDir(
                 std.fmt.bufPrint(&rel_entry_buf, "{s}/{s}", .{ cur_rel, entry.name }) catch continue;
 
             const is_directory = (entry.kind == .directory);
-            if (gitignore.isIgnored(rel_entry, is_directory)) continue;
+            if (gitignore.isIgnored(rel_entry, is_directory) or (dir_gi.content.len > 0 and dir_gi.isIgnored(entry.name, is_directory))) continue;
 
-            if (!is_directory) {
-                const in_idx = if (idx_scanner) |*s| s.contains(rel_entry, false) else false;
-                if (!in_idx) {
-                    info.untracked = true;
-                    break;
-                }
-            } else {
-                const in_idx = if (idx_scanner) |*s| s.contains(rel_entry, true) else false;
-                if (!in_idx) {
-                    info.untracked = true;
-                    break;
-                }
+            if (is_directory) {
                 if (q_tail < MaxQueue) {
                     @memcpy(queue_buf[q_tail][0..rel_entry.len], rel_entry);
                     queue_len[q_tail] = rel_entry.len;
                     q_tail += 1;
+                }
+            } else {
+                const in_idx = if (idx_scanner) |*s| s.contains(rel_entry, false) else false;
+                if (!in_idx) {
+                    info.untracked = true;
+                    break;
                 }
             }
         }

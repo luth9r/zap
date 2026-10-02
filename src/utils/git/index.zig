@@ -68,7 +68,7 @@ fn skipEntryPadding(reader: anytype, header_len: usize, name_len: usize) bool {
 
 pub const GitIndexScanner = struct {
     file: std.Io.File,
-    stream_buf: [4096]u8 = undefined,
+    stream_buf: [8192]u8 = undefined,
     entry_count: u32 = 0,
     version: u32 = 2,
     io: std.Io,
@@ -126,10 +126,6 @@ pub const GitIndexScanner = struct {
                 if (std.mem.eql(u8, entry_name, target_path)) {
                     return true;
                 }
-            }
-
-            if (!is_dir and std.mem.order(u8, entry_name, target_path) == .gt) {
-                return false;
             }
 
             if (!skipEntryPadding(&reader, header_len, entry_name.len)) break;

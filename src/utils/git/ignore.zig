@@ -52,25 +52,30 @@ pub const GitIgnore = struct {
                 pattern = pattern[1..];
             }
 
-            if (is_dir_only and !is_dir) {
-                // If rule is directory-only, check if any parent directory segment matches
-                var it = std.mem.splitScalar(u8, path, '/');
-                var matched_parent = false;
-                while (it.next()) |segment| {
-                    if (matchPattern(pattern, segment)) {
+            // Check if any parent directory prefix matches the directory rule
+            var slash_idx: usize = 0;
+            var matched_parent = false;
+            while (slash_idx < path.len) : (slash_idx += 1) {
+                if (path[slash_idx] == '/') {
+                    const parent_prefix = path[0..slash_idx];
+                    const parent_base = std.fs.path.basename(parent_prefix);
+                    if (matchPattern(pattern, parent_prefix) or (!is_anchored and matchPattern(pattern, parent_base))) {
                         matched_parent = true;
                         break;
                     }
                 }
-                if (matched_parent) {
-                    ignored = !is_negation;
-                }
+            }
+
+            if (matched_parent) {
+                ignored = !is_negation;
                 continue;
             }
 
-            // If pattern contains '/', it must match the relative path. Otherwise, it matches anywhere (basename).
-            if (matchPattern(pattern, path) or (!is_anchored and matchPattern(pattern, base_name))) {
-                ignored = !is_negation;
+            if (!is_dir_only or is_dir) {
+                // If pattern contains '/', it must match the relative path. Otherwise, it matches anywhere (basename).
+                if (matchPattern(pattern, path) or (!is_anchored and matchPattern(pattern, base_name))) {
+                    ignored = !is_negation;
+                }
             }
         }
 
@@ -287,3 +292,14 @@ test "unit: GitIgnore handles unlimited number of rules without allocation" {
     try testing.expect(gi.isIgnored("pattern_999.txt", false));
     try testing.expect(!gi.isIgnored("pattern_1000.txt", false));
 }
+
+test "unit: GitIgnore matches directory-only rules with slashes against nested files" {
+    const gi = GitIgnore.parse("frontend/dist/\ndocs/node_modules/\nbuild/output/");
+    try testing.expect(gi.isIgnored("frontend/dist/favicon.svg", false));
+    try testing.expect(gi.isIgnored("frontend/dist/assets/index.js", false));
+    try testing.expect(gi.isIgnored("docs/node_modules/.bin/esbuild", false));
+    try testing.expect(gi.isIgnored("build/output/bin/app", false));
+    try testing.expect(!gi.isIgnored("frontend/src/main.ts", false));
+    try testing.expect(!gi.isIgnored("backend/dist/other.txt", false));
+}
+

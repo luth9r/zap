@@ -1103,5 +1103,113 @@ test "integration: git_status massive repo stress test with 1000 files across 20
     try Harness.expectVisibleText(out, "?");
 }
 
+test "integration: git_status respects nested subdirectory gitignore files" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("src/main.zig", "pub fn main() {}");
+    try h.writeFile("frontend/src/app.ts", "console.log('hi');");
+    try h.writeFile("frontend/.gitignore", "dist/\nnode_modules/\n*.tmp\n");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Create ignored files inside frontend/ according to frontend/.gitignore
+    try h.writeFile("frontend/dist/favicon.svg", "<svg></svg>");
+    try h.writeFile("frontend/node_modules/pkg/index.js", "module.exports = {};");
+    try h.writeFile("frontend/cache.tmp", "temp");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    // Should render empty because all new files are in frontend/.gitignore
+    const out_clean = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out_clean.len);
+
+    // Now write a real untracked file inside frontend/
+    try h.writeFile("frontend/src/new_page.vue", "<template></template>");
+    const out_untracked = try h.collectAllShells();
+    try Harness.expectVisibleText(out_untracked, "?");
+}
+
+test "integration: git_status ignores empty and new directories without files" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("root.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Create empty directory structure
+    const empty_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/empty_dir", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "mkdir", "-p", empty_path });
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
+
+test "integration: git_status respects git info exclude rules" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("tracked.txt", "v1");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Add rule to .git/info/exclude
+    try h.writeFile(".git/info/exclude", "secret.env\n*.local\n");
+
+    // Create files that match .git/info/exclude
+    try h.writeFile("secret.env", "KEY=123");
+    try h.writeFile("app.local", "LOCAL=1");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out_clean = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out_clean.len);
+
+    // Now add real untracked file
+    try h.writeFile("untracked.txt", "untracked");
+    const out_untracked = try h.collectAllShells();
+    try Harness.expectVisibleText(out_untracked, "?");
+}
+
+test "integration: git_status handles tracked symlinks without false modified status" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("scripts/build.sh", "echo 'building project with multiple lines of script text here';");
+    try h.writeFile("regular.txt", "regular content");
+
+    // Create tracked symlink bin_tool pointing to scripts/build.sh
+    const symlink_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/bin_tool", .{h.tmp_dir});
+    try h.run(&[_][]const u8{ "ln", "-s", "scripts/build.sh", symlink_path });
+
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "commit with symlink" });
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    // Must be completely clean
+    const out = try h.collect(.generic);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
+}
+
 
 
