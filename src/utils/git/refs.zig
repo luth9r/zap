@@ -205,3 +205,45 @@ pub fn getGitCommit(
 
     return null;
 }
+
+/// Checks if git repository has stashed changes.
+pub fn hasStash(io: std.Io, git_dir: []const u8) bool {
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    // 1. Check .git/logs/refs/stash
+    const stash_log_path = std.fmt.bufPrint(&path_buf, "{s}/logs/refs/stash", .{git_dir}) catch return false;
+    var content_buf: [64]u8 = undefined;
+    if (fs.readSmallFile(io, stash_log_path, &content_buf)) |content| {
+        if (content.len > 0) return true;
+    }
+
+    // 2. Check .git/refs/stash
+    const stash_ref_path = std.fmt.bufPrint(&path_buf, "{s}/refs/stash", .{git_dir}) catch return false;
+    return fs.fileExists(io, stash_ref_path);
+}
+
+const testing = std.testing;
+
+test "unit: hasStash detects stash existence" {
+    const io = testing.io;
+    const tmp = "/tmp/zap_test_stash_unit";
+    std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
+    std.Io.Dir.cwd().createDirPath(io, tmp) catch return;
+    defer std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
+
+    // Initial state: no stash
+    try testing.expect(!hasStash(io, tmp));
+
+    // Create logs/refs directory and stash file
+    var stash_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const stash_dir = try std.fmt.bufPrint(&stash_dir_buf, "{s}/logs/refs", .{tmp});
+    try std.Io.Dir.cwd().createDirPath(io, stash_dir);
+
+    var stash_file_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const stash_file = try std.fmt.bufPrint(&stash_file_buf, "{s}/logs/refs/stash", .{tmp});
+    try fs.writeFileAbsolute(io, stash_file, "000000 111111 User <user@zap> WIP on master\n");
+
+    // After creating stash log: hasStash is true
+    try testing.expect(hasStash(io, tmp));
+}
+

@@ -315,12 +315,12 @@ test "integration: prompt render latency under 1ms in real git repo" {
     const warm_out = try h.collect(.generic);
     try Harness.expectContains(warm_out, "perf-benchmark-branch");
 
-    // In-process hot render benchmark across 100 iterations with direct .git/HEAD inspection
+    // In-process hot render benchmark across 100 iterations with full git stack (git_branch, git_status, git_state, git_commit)
     var buf: [2048]u8 = undefined;
     var pos: usize = 0;
     const writer = BufferWriter.init(&buf, &pos);
     var cfg = config_mod.defaultConfig();
-    cfg.format = "$directory$git_branch$character";
+    cfg.format = "$directory$git_branch$git_status$git_state$git_commit$character";
     const io = std.testing.io;
 
     const in_proc_start = std.Io.Clock.awake.now(io);
@@ -338,7 +338,7 @@ test "integration: prompt render latency under 1ms in real git repo" {
     const in_proc_total_ns = in_proc_start.untilNow(io, .awake).toNanoseconds();
     const avg_in_proc_ns = @divTrunc(in_proc_total_ns, in_proc_iters);
 
-    // Direct in-process render must be strictly under 1 millisecond (1,000,000 ns)
+    // Direct in-process render with full native Git stack must be strictly under 1 millisecond (1,000,000 ns)
     try testing.expect(avg_in_proc_ns < 1_000_000);
 }
 

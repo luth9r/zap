@@ -5,7 +5,7 @@ const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 
-pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, renamed, ahead_behind };
+pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, ahead_behind };
 
 pub const GitStatusConfig = struct {
     // Format template for the git_status module.
@@ -18,8 +18,6 @@ pub const GitStatusConfig = struct {
     modified: []const u8 = "!",
     // Symbol shown when untracked files exist.
     untracked: []const u8 = "?",
-    // Symbol shown when files are renamed.
-    renamed: []const u8 = "»",
     // Symbol shown when files are deleted.
     deleted: []const u8 = "✘",
     // Symbol shown when stashed changes exist.
@@ -53,7 +51,6 @@ pub fn formatAllStatus(
         "conflicted",
         "stashed",
         "deleted",
-        "renamed",
         "modified",
         "staged",
         "untracked",
@@ -140,7 +137,6 @@ pub fn render(
             .{ .name = .modified, .value = if (info.modified) config.modified else "" },
             .{ .name = .staged, .value = if (info.staged) config.staged else "" },
             .{ .name = .untracked, .value = if (info.untracked) config.untracked else "" },
-            .{ .name = .renamed, .value = if (info.renamed) config.renamed else "" },
             .{ .name = .deleted, .value = if (info.deleted) config.deleted else "" },
         },
     });
@@ -165,12 +161,11 @@ test "unit: formatAllStatus and formatAheadBehind" {
     try std.testing.expectEqualStrings("⇕1 2", formatAheadBehind(&ab_buf, cfg, 1, 2));
 }
 
-test "unit: formatAllStatus with conflicted, deleted, and renamed flags" {
+test "unit: formatAllStatus with conflicted, deleted flags" {
     const cfg = GitStatusConfig{};
     const info = git_utils.GitStatusInfo{
         .conflicted = true,
         .deleted = true,
-        .renamed = true,
         .modified = true,
         .staged = true,
         .untracked = true,
@@ -180,7 +175,7 @@ test "unit: formatAllStatus with conflicted, deleted, and renamed flags" {
     var buf: [128]u8 = undefined;
     const status_str = formatAllStatus(&buf, cfg, info);
 
-    try std.testing.expectEqualStrings("=$✘»!+?", status_str);
+    try std.testing.expectEqualStrings("=$✘!+?", status_str);
 }
 
 pub const Harness = @import("../../../tests/harness.zig").Harness;
@@ -316,7 +311,7 @@ test "integration: git_status with deleted file shows deleted symbol" {
     try h.writeFile("to_delete.txt", "content");
     try h.git(&.{ "add", "to_delete.txt" });
     try h.git(&.{ "commit", "-m", "add to_delete" });
-    try h.git(&.{ "rm", "to_delete.txt" });
+    try h.deleteFile("to_delete.txt");
 
     try h.setConfig(
         \\format = "$git_status"
@@ -327,7 +322,7 @@ test "integration: git_status with deleted file shows deleted symbol" {
     try Harness.expectVisibleText(out, "✘");
 }
 
-test "integration: git_status with renamed file shows renamed symbol" {
+test "integration: git_status with renamed file shows staged symbol" {
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();
 
@@ -335,7 +330,7 @@ test "integration: git_status with renamed file shows renamed symbol" {
     try h.writeFile("original.txt", "content");
     try h.git(&.{ "add", "original.txt" });
     try h.git(&.{ "commit", "-m", "add original" });
-    try h.git(&.{ "mv", "original.txt", "renamed.txt" });
+    try h.git(&.{ "mv", "original.txt", "modified.txt" });
 
     try h.setConfig(
         \\format = "$git_status"
@@ -343,7 +338,7 @@ test "integration: git_status with renamed file shows renamed symbol" {
     );
 
     const out = try h.collectAllShells();
-    try Harness.expectVisibleText(out, "»");
+    try Harness.expectVisibleText(out, "+");
 }
 
 test "integration: git_status with stashed changes shows stash symbol" {
@@ -483,11 +478,11 @@ test "integration: git_status combined multiple flags simultaneously" {
     try h.writeFile("stash.txt", "v2");
     try h.git(&.{"stash"});
 
-    // 3. Rename a file (renamed: »)
+    // 3. Rename a file (staged: +)
     try h.git(&.{ "mv", "orig_renamed.txt", "renamed.txt" });
 
     // 4. Delete a file (deleted: ✘)
-    try h.git(&.{ "rm", "to_delete.txt" });
+    try h.deleteFile("to_delete.txt");
 
     // 5. Stage a file (staged: +)
     try h.writeFile("staged.txt", "staged_v2");
@@ -507,7 +502,6 @@ test "integration: git_status combined multiple flags simultaneously" {
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "$"); // stashed
     try Harness.expectVisibleText(out, "✘"); // deleted
-    try Harness.expectVisibleText(out, "»"); // renamed
     try Harness.expectVisibleText(out, "!"); // modified
     try Harness.expectVisibleText(out, "+"); // staged
     try Harness.expectVisibleText(out, "?"); // untracked
@@ -577,6 +571,442 @@ test "integration: git_status conflicted and diverged with custom symbols" {
 
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "[CONFLICT]");
+}
+
+test "integration: git_status detects untracked file in deep subdirectory" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("src/main.zig", "pub fn main() {}");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Add untracked file inside existing tracked directory src/
+    try h.writeFile("src/nested_untracked.zig", "const x = 1;");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status stress test with 500+ files and nested directory tree" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // Create 500 files across 10 subdirectories
+    var dir_idx: usize = 0;
+    while (dir_idx < 10) : (dir_idx += 1) {
+        var file_idx: usize = 0;
+        while (file_idx < 50) : (file_idx += 1) {
+            var path_buf: [64]u8 = undefined;
+            const path = try std.fmt.bufPrint(&path_buf, "dir{d}/file_{d}.txt", .{ dir_idx, file_idx });
+            try h.writeFile(path, "content");
+        }
+    }
+
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "large repo commit" });
+
+    // 1. Stage a new file (+)
+    try h.writeFile("dir0/staged.txt", "staged_content");
+    try h.git(&.{ "add", "dir0/staged.txt" });
+
+    // 2. Modify an existing tracked file (!)
+    try h.writeFile("dir1/file_0.txt", "modified_content");
+
+    // 3. Delete an existing tracked file (✘)
+    try h.deleteFile("dir2/file_0.txt");
+
+    // 4. Add an untracked file in a nested directory (?)
+    try h.writeFile("dir3/untracked_nested.txt", "untracked_content");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "+");
+    try Harness.expectVisibleText(out, "!");
+    try Harness.expectVisibleText(out, "✘");
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status ahead count with large reflog exceeding buffer limit" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // Generate 50 commits to make reflog file grow past 6-8 KB
+    var c_idx: usize = 0;
+    while (c_idx < 50) : (c_idx += 1) {
+        var msg_buf: [64]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&msg_buf, "historical commit number {d}", .{c_idx});
+        try h.git(&.{ "commit", "--allow-empty", "-m", msg });
+    }
+
+    // Set upstream tracking branch at current historical commit
+    try h.git(&.{ "branch", "origin_master" });
+    try h.git(&.{ "branch", "--set-upstream-to=origin_master", "master" });
+
+    // Make 5 new commits ahead of upstream
+    var ahead_idx: usize = 0;
+    while (ahead_idx < 5) : (ahead_idx += 1) {
+        var msg_buf: [64]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&msg_buf, "new ahead commit {d}", .{ahead_idx});
+        try h.git(&.{ "commit", "--allow-empty", "-m", msg });
+    }
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    // Must display ahead 5 (⇡5), and must NOT false-report diverged (⇕)
+    try Harness.expectVisibleText(out, "⇡5");
+    try Harness.expectNotContains(out, "⇕");
+}
+
+test "integration: git_status complex stress scenario with multi-directory modifications, staging, deletions, untracked, ignore rules, stash and ahead" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // 1. Setup .gitignore with multiple pattern types
+    try h.writeFile(".gitignore", "*.log\ntemp/\nbuild/\n*.tmp\n");
+
+    // 2. Create 200 tracked files across 10 subdirectories
+    var dir_idx: usize = 0;
+    while (dir_idx < 10) : (dir_idx += 1) {
+        var file_idx: usize = 0;
+        while (file_idx < 20) : (file_idx += 1) {
+            var path_buf: [64]u8 = undefined;
+            const path = try std.fmt.bufPrint(&path_buf, "dir{d}/file_{d}.txt", .{ dir_idx, file_idx });
+            try h.writeFile(path, "initial content");
+        }
+    }
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "initial commit of 200 files" });
+
+    // 3. Set upstream tracking branch and add ahead commits
+    try h.git(&.{ "branch", "origin_main" });
+    try h.git(&.{ "branch", "--set-upstream-to=origin_main", "master" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead commit 1" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead commit 2" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead commit 3" });
+
+    // 4. Stash a change ($)
+    try h.writeFile("dir0/file_0.txt", "stash candidate");
+    try h.git(&.{"stash"});
+
+    // 5. Create multiple ignored files and directories (must NOT trigger untracked flag '?')
+    try h.writeFile("dir0/debug.log", "some log info");
+    try h.writeFile("dir1/cache.tmp", "temp data");
+    try h.writeFile("temp/nested_temp.txt", "ignored temp file");
+    try h.writeFile("build/output.bin", "binary data");
+
+    // 6. Stage multiple modifications and newly added files (+)
+    try h.writeFile("dir2/file_1.txt", "staged modified content 1");
+    try h.writeFile("dir3/file_2.txt", "staged modified content 2");
+    try h.writeFile("dir4/newly_staged.txt", "brand new staged file");
+    try h.git(&.{ "add", "dir2/file_1.txt", "dir3/file_2.txt", "dir4/newly_staged.txt" });
+
+    // 7. Modify multiple tracked unstaged files (!)
+    try h.writeFile("dir5/file_3.txt", "unstaged modification A");
+    try h.writeFile("dir6/file_4.txt", "unstaged modification B");
+
+    // 8. Delete multiple tracked files (✘)
+    try h.deleteFile("dir7/file_5.txt");
+    try h.deleteFile("dir8/file_6.txt");
+
+    // 9. Add multiple real untracked files across different folders (?)
+    try h.writeFile("dir9/real_untracked_1.txt", "untracked 1");
+    try h.writeFile("dir0/real_untracked_2.txt", "untracked 2");
+    try h.writeFile("root_untracked.txt", "root untracked");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "$"); // stash
+    try Harness.expectVisibleText(out, "✘"); // deleted
+    try Harness.expectVisibleText(out, "!"); // modified
+    try Harness.expectVisibleText(out, "+"); // staged
+    try Harness.expectVisibleText(out, "?"); // untracked
+    try Harness.expectVisibleText(out, "⇡3"); // ahead 3
+}
+
+test "integration: git_status complex diverged counts with large commit histories and dirty index" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // 1. Initial base commit
+    try h.writeFile("base.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base" });
+
+    // 2. Create upstream branch and add 4 behind commits
+    try h.git(&.{ "checkout", "-b", "upstream_branch" });
+    var behind_idx: usize = 0;
+    while (behind_idx < 4) : (behind_idx += 1) {
+        var msg_buf: [64]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&msg_buf, "behind commit {d}", .{behind_idx});
+        try h.git(&.{ "commit", "--allow-empty", "-m", msg });
+    }
+
+    // 3. Switch back to master, branch out to feature, and add 7 ahead commits
+    try h.git(&.{ "checkout", "master" });
+    try h.git(&.{ "checkout", "-b", "feature_branch" });
+    try h.git(&.{ "branch", "--set-upstream-to=upstream_branch", "feature_branch" });
+
+    var ahead_idx: usize = 0;
+    while (ahead_idx < 7) : (ahead_idx += 1) {
+        var msg_buf: [64]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&msg_buf, "ahead commit {d}", .{ahead_idx});
+        try h.git(&.{ "commit", "--allow-empty", "-m", msg });
+    }
+
+    // 4. Populate with 50 files and make working directory dirty
+    var f_idx: usize = 0;
+    while (f_idx < 50) : (f_idx += 1) {
+        var path_buf: [64]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "pkg/file_{d}.txt", .{f_idx});
+        try h.writeFile(path, "tracked content");
+    }
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "add 50 files" });
+
+    // Now feature has 8 ahead commits and 4 behind
+    // Create dirty state (modified + untracked + staged)
+    try h.writeFile("pkg/file_0.txt", "modified content");
+    try h.writeFile("pkg/new_file.txt", "staged new file");
+    try h.git(&.{ "add", "pkg/new_file.txt" });
+    try h.writeFile("untracked_probe.txt", "untracked");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "⇕8 4");
+    try Harness.expectVisibleText(out, "!");
+    try Harness.expectVisibleText(out, "+");
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status deep nested directories with partial ignores and untracked files" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // 1. Setup gitignore with deep pattern
+    try h.writeFile(".gitignore", "src/**/ignored_*\n*.bak\n");
+
+    // 2. Create 5-level deep directory tree
+    try h.writeFile("src/level1/level2/level3/level4/tracked.zig", "const x = 42;");
+    try h.writeFile("src/level1/level2/tracked_mid.zig", "const y = 10;");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "deep tree init" });
+
+    // 3. Create ignored files in deep directories
+    try h.writeFile("src/level1/level2/level3/level4/ignored_cache.tmp", "ignored");
+    try h.writeFile("src/level1/ignored_data.txt", "ignored");
+    try h.writeFile("src/backup.bak", "ignored backup");
+
+    // 4. Create real untracked files in deep directories
+    try h.writeFile("src/level1/level2/level3/level4/new_deep.zig", "const z = 100;");
+
+    // 5. Modify tracked deep file
+    try h.writeFile("src/level1/level2/tracked_mid.zig", "const y = 20; // modified");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "!");
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status in git worktree" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("main.txt", "v1");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // Create a git worktree
+    const wt_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/wt", .{h.tmp_dir});
+    try h.git(&.{ "worktree", "add", "-b", "wt_branch", wt_path });
+
+    // Switch cwd to worktree and make changes
+    _ = try h.setCwd("wt");
+    try h.writeFile("wt/worktree_file.txt", "new worktree content");
+    try h.git(&.{ "-C", wt_path, "add", "worktree_file.txt" });
+    try h.writeFile("wt/untracked.txt", "untracked");
+
+    try h.setConfig(
+        \\format = "$git_branch $git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "wt_branch");
+    try Harness.expectVisibleText(out, "+");
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status with packed-refs after git gc" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base commit" });
+
+    // Upstream tracking branch
+    try h.git(&.{ "branch", "origin_main" });
+    try h.git(&.{ "branch", "--set-upstream-to=origin_main", "master" });
+
+    // Add 2 ahead commits
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead 1" });
+    try h.git(&.{ "commit", "--allow-empty", "-m", "ahead 2" });
+
+    // Run git gc to pack all loose refs into .git/packed-refs
+    try h.git(&.{"gc"});
+
+    // Make a dirty working copy
+    try h.writeFile("file.txt", "modified after gc");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "!");
+    try Harness.expectVisibleText(out, "⇡2");
+}
+
+test "integration: git_status in detached HEAD state" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "v1");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "commit 1" });
+
+    try h.writeFile("file.txt", "v2");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "commit 2" });
+
+    // Detach HEAD to first commit
+    try h.git(&.{ "checkout", "HEAD~1" });
+
+    // Make local modifications
+    try h.writeFile("detached_new.txt", "untracked");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "?");
+}
+
+test "integration: git_status staged deletions and additions combined" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("keep.txt", "keep");
+    try h.writeFile("to_remove.txt", "delete me");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "init" });
+
+    // 1. Staged deletion (git rm)
+    try h.git(&.{ "rm", "to_remove.txt" });
+
+    // 2. Staged addition (new file)
+    try h.writeFile("brand_new.txt", "new");
+    try h.git(&.{ "add", "brand_new.txt" });
+
+    // 3. Unstaged modification
+    try h.writeFile("keep.txt", "keep modified");
+
+    // 4. Untracked file
+    try h.writeFile("untracked.txt", "untracked");
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "+"); // staged (addition or deletion)
+    try Harness.expectVisibleText(out, "!"); // modified
+    try Harness.expectVisibleText(out, "?"); // untracked
+}
+
+test "integration: git_status massive repo stress test with 1000 files across 20 directories" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    // Generate 1000 files across 20 subdirectories
+    var dir_idx: usize = 0;
+    while (dir_idx < 20) : (dir_idx += 1) {
+        var file_idx: usize = 0;
+        while (file_idx < 50) : (file_idx += 1) {
+            var path_buf: [64]u8 = undefined;
+            const path = try std.fmt.bufPrint(&path_buf, "sub_{d}/f_{d}.zig", .{ dir_idx, file_idx });
+            try h.writeFile(path, "const val = 123;");
+        }
+    }
+
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "1000 files commit" });
+
+    // Make modifications across several directories
+    try h.writeFile("sub_0/f_0.zig", "const val = 999;"); // unstaged modified (!)
+    try h.writeFile("sub_5/new_staged.zig", "const staged = true;");
+    try h.git(&.{ "add", "sub_5/new_staged.zig" }); // staged (+)
+    try h.deleteFile("sub_10/f_5.zig"); // unstaged deleted (✘)
+    try h.writeFile("sub_15/untracked_nested.zig", "const un = true;"); // untracked (?)
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out = try h.collectAllShells();
+    try Harness.expectVisibleText(out, "+");
+    try Harness.expectVisibleText(out, "!");
+    try Harness.expectVisibleText(out, "✘");
+    try Harness.expectVisibleText(out, "?");
 }
 
 

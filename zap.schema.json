@@ -237,11 +237,6 @@
           "default": "?",
           "description": "Symbol shown when untracked files exist"
         },
-        "renamed": {
-          "type": "string",
-          "default": "»",
-          "description": "Symbol shown when files are renamed"
-        },
         "deleted": {
           "type": "string",
           "default": "✘",

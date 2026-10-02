@@ -174,6 +174,12 @@ pub const Harness = struct {
         try git_utils.writeFileAbsolute(std.testing.io, full_path, content);
     }
 
+    /// Delete a file inside the test directory.
+    pub fn deleteFile(self: *Harness, rel_path: []const u8) !void {
+        const full_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}/{s}", .{ self.tmp_dir, rel_path });
+        try std.Io.Dir.deleteFileAbsolute(std.testing.io, full_path);
+    }
+
     /// Set a custom working directory relative to tmp_dir (or absolute) for this test.
     pub fn setCwd(self: *Harness, rel_or_abs: []const u8) !*Harness {
         if (std.fs.path.isAbsolute(rel_or_abs)) {

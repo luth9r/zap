@@ -24,26 +24,8 @@ pub const getGitCommit = git.getGitCommit;
 
 pub const getGitState = git.getGitState;
 
-pub const parseGitStatusPorcelainV2 = git.parseGitStatusPorcelainV2;
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
-
-test "unit: parseGitStatusPorcelainV2 with stash, deleted and renamed files" {
-    const output =
-        \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
-        \\# branch.head main
-        \\# stash 2
-        \\1 .D N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 deleted.txt
-        \\2 R. N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 R100 new.txt orig.txt
-        \\
-    ;
-
-    const info = parseGitStatusPorcelainV2(output);
-    try std.testing.expect(info.stashed);
-    try std.testing.expect(info.deleted);
-    try std.testing.expect(info.renamed);
-    try std.testing.expect(info.hasAnyStatus());
-}
 
 test "unit: parseHeadContent on regular branch" {
     const raw = "ref: refs/heads/main\n";
@@ -71,35 +53,11 @@ test "unit: GitStatusInfo hasAnyStatus" {
     try std.testing.expectEqual(true, info.hasAnyStatus());
 }
 
-test "unit: parseGitStatusPorcelainV2 parses branch and changed files" {
-    const output =
-        \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
-        \\# branch.head main
-        \\# branch.upstream origin/main
-        \\# branch.ab +4 -2
-        \\1 .M N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 README.md
-        \\1 M. N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 file2.zig
-        \\? src/engine/context.zig
-        \\u unmerged.txt
-        \\
-    ;
-
-    const info = parseGitStatusPorcelainV2(output);
-    try std.testing.expectEqual(@as(usize, 4), info.ahead);
-    try std.testing.expectEqual(@as(usize, 2), info.behind);
-    try std.testing.expect(info.modified);
-    try std.testing.expect(info.staged);
-    try std.testing.expect(info.untracked);
-    try std.testing.expect(info.conflicted);
-    try std.testing.expect(info.hasAnyStatus());
-}
-
 test "unit: GitStatusInfo all flags verified" {
     var info = GitStatusInfo{
         .staged = true,
         .modified = true,
         .untracked = true,
-        .renamed = true,
         .deleted = true,
         .stashed = true,
         .conflicted = true,
@@ -111,32 +69,10 @@ test "unit: GitStatusInfo all flags verified" {
     try std.testing.expect(info.staged);
     try std.testing.expect(info.modified);
     try std.testing.expect(info.untracked);
-    try std.testing.expect(info.renamed);
     try std.testing.expect(info.deleted);
     try std.testing.expect(info.stashed);
     try std.testing.expectEqual(@as(usize, 3), info.ahead);
     try std.testing.expectEqual(@as(usize, 1), info.behind);
-}
-
-test "unit: parseGitStatusPorcelainV2 with stash and renames" {
-    const output =
-        \\# branch.oid 5a9ce44ce1fa3fe29f7341445e332fca52db6e14
-        \\# branch.head main
-        \\# branch.upstream origin/main
-        \\# branch.ab +0 -0
-        \\# stash 2
-        \\2 R. N... 100644 100644 100644 734134628fce61f6c65a366769ec4819b205b950 734134628fce61f6c65a366769ec4819b205b950 R100 new_name.zig old_name.zig
-        \\1 D. N... 100644 000000 000000 734134628fce61f6c65a366769ec4819b205b950 0000000000000000000000000000000000000000 deleted.zig
-        \\? untracked_file.txt
-        \\
-    ;
-
-    const info = parseGitStatusPorcelainV2(output);
-    try std.testing.expect(info.stashed);
-    try std.testing.expect(info.renamed);
-    try std.testing.expect(info.staged);
-    try std.testing.expect(info.deleted);
-    try std.testing.expect(info.untracked);
 }
 
 test "unit: getGitStatus live repo execution" {

@@ -31,6 +31,22 @@ pub fn readSmallFile(io: std.Io, path: []const u8, buf: []u8) ?[]const u8 {
     return std.mem.trim(u8, buf[0..n], " \t\r\n");
 }
 
+/// Reads the trailing bytes (tail) of a file up to buf.len.
+pub fn readTailFile(io: std.Io, path: []const u8, buf: []u8) ?[]const u8 {
+    var file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
+    defer file.close(io);
+    const st = file.stat(io) catch return null;
+    if (st.size == 0) return null;
+    const to_read: usize = @intCast(@min(st.size, buf.len));
+    const offset: u64 = st.size - to_read;
+    var stream_buf: [256]u8 = undefined;
+    var reader = file.reader(io, &stream_buf);
+    reader.seekTo(offset) catch return null;
+    const n = reader.interface.readSliceShort(buf[0..to_read]) catch return null;
+    if (n == 0) return null;
+    return buf[0..n];
+}
+
 /// Writes content to an absolute file path, creating parent directories if needed.
 pub fn writeFileAbsolute(io: std.Io, path: []const u8, content: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent| {
