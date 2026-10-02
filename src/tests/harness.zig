@@ -57,6 +57,53 @@ pub const Harness = struct {
 
     const relative_zap_bin = if (builtin.os.tag == .windows) "zig-out/bin/zap.exe" else "zig-out/bin/zap";
 
+    fn getEnvWindows(name: []const u8, out_utf8: []u8) ?[]const u8 {
+        if (builtin.os.tag != .windows) return null;
+        const kernel32 = struct {
+            const WINAPI: std.builtin.CallingConvention = if (builtin.cpu.arch == .x86) .stdcall else .c;
+            extern "kernel32" fn GetEnvironmentVariableW(
+                lpName: [*:0]const u16,
+                lpBuffer: [*]u16,
+                nSize: u32,
+            ) callconv(WINAPI) u32;
+        };
+
+        var name_w: [64:0]u16 = undefined;
+        const name_len = std.unicode.utf8ToUtf16Le(&name_w, name) catch return null;
+        name_w[name_len] = 0;
+
+        var buf_w: [std.fs.max_path_bytes]u16 = undefined;
+        const len = kernel32.GetEnvironmentVariableW(&name_w, &buf_w, buf_w.len);
+        if (len == 0 or len >= buf_w.len) return null;
+
+        const utf8_len = std.unicode.utf16LeToUtf8(out_utf8, buf_w[0..len]) catch return null;
+        return out_utf8[0..utf8_len];
+    }
+
+    fn setEnvWindows(name: []const u8, value: ?[]const u8) void {
+        if (builtin.os.tag != .windows) return;
+        const kernel32 = struct {
+            const WINAPI: std.builtin.CallingConvention = if (builtin.cpu.arch == .x86) .stdcall else .c;
+            extern "kernel32" fn SetEnvironmentVariableW(
+                lpName: [*:0]const u16,
+                lpValue: ?[*:0]const u16,
+            ) callconv(WINAPI) c_int;
+        };
+
+        var name_w: [64:0]u16 = undefined;
+        const name_len = std.unicode.utf8ToUtf16Le(&name_w, name) catch return;
+        name_w[name_len] = 0;
+
+        if (value) |v| {
+            var val_w: [std.fs.max_path_bytes:0]u16 = undefined;
+            const val_len = std.unicode.utf8ToUtf16Le(&val_w, v) catch return;
+            val_w[val_len] = 0;
+            _ = kernel32.SetEnvironmentVariableW(&name_w, &val_w);
+        } else {
+            _ = kernel32.SetEnvironmentVariableW(&name_w, null);
+        }
+    }
+
     /// Create an isolated test environment with a fresh temporary directory.
     /// The zap binary must be pre-built (`zig build` runs before `zig build test`
     /// thanks to the build.zig dependency).
@@ -87,13 +134,13 @@ pub const Harness = struct {
         const random: std.Random.IoSource = .{ .io = io };
         const rand_id = random.interface().int(u64);
         const tmp_dir = if (builtin.os.tag == .windows) blk: {
-            var temp_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const temp_base = if (std.process.getEnvVar(io, &temp_buf, "TEMP") catch null) |t|
+            var env_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const temp_base = if (getEnvWindows("TEMP", &env_buf)) |t|
                 t
-            else if (std.process.getEnvVar(io, &temp_buf, "TMP") catch null) |t|
+            else if (getEnvWindows("TMP", &env_buf)) |t|
                 t
-            else if (std.process.getEnvVar(io, &temp_buf, "USERPROFILE") catch null) |u|
-                try std.fmt.bufPrint(&temp_buf, "{s}\\AppData\\Local\\Temp", .{u})
+            else if (getEnvWindows("USERPROFILE", &env_buf)) |u|
+                u
             else
                 "C:\\Temp";
             break :blk try std.fmt.allocPrint(alloc, "{s}\\zap-test-{x}", .{ temp_base, rand_id });
@@ -256,56 +303,67 @@ pub const Harness = struct {
             .generic => "generic",
         };
 
-        // Build env vars for `env` command to ensure 100% hermetic isolation from host environment
-        const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
-        const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
-        const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
-        const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
-        const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
-
-        // Build argv: env KEY=VALUE... zap prompt --status N --duration N --shell S
         var argv_buf: [24][]const u8 = undefined;
         var argc: usize = 0;
 
-        argv_buf[argc] = "env";
-        argc += 1;
-        argv_buf[argc] = home_env;
-        argc += 1;
-        argv_buf[argc] = userprofile_env;
-        argc += 1;
-        argv_buf[argc] = pwd_env;
-        argc += 1;
-        argv_buf[argc] = xdg_env;
-        argc += 1;
-        argv_buf[argc] = appdata_env;
-        argc += 1;
+        if (builtin.os.tag == .windows) {
+            setEnvWindows("HOME", current_home);
+            setEnvWindows("USERPROFILE", current_home);
+            setEnvWindows("PWD", current_pwd);
+            var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const xdg_val = std.fmt.bufPrint(&xdg_buf, "{s}\\.config", .{current_home}) catch null;
+            setEnvWindows("XDG_CONFIG_HOME", xdg_val);
+            var appdata_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const appdata_val = std.fmt.bufPrint(&appdata_buf, "{s}\\AppData", .{current_home}) catch null;
+            setEnvWindows("APPDATA", appdata_val);
 
-        if (self.has_config) {
-            const config_env = try std.fmt.allocPrint(alloc, "ZAP_CONFIG={s}/config.toml", .{self.tmp_dir});
-            argv_buf[argc] = config_env;
-            argc += 1;
+            if (self.has_config) {
+                var cfg_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const cfg_val = std.fmt.bufPrint(&cfg_buf, "{s}\\config.toml", .{self.tmp_dir}) catch null;
+                setEnvWindows("ZAP_CONFIG", cfg_val);
+            } else {
+                setEnvWindows("ZAP_CONFIG", null);
+            }
+
+            argv_buf[argc] = self.zap_bin; argc += 1;
+            argv_buf[argc] = "prompt"; argc += 1;
+            argv_buf[argc] = "--status"; argc += 1;
+            argv_buf[argc] = status_str; argc += 1;
+            argv_buf[argc] = "--duration"; argc += 1;
+            argv_buf[argc] = duration_str; argc += 1;
+            argv_buf[argc] = "--shell"; argc += 1;
+            argv_buf[argc] = shell_str; argc += 1;
         } else {
-            // Explicitly clear ZAP_CONFIG in case host environment has it exported
-            argv_buf[argc] = "ZAP_CONFIG=";
-            argc += 1;
-        }
+            // Build env vars for `env` command to ensure 100% hermetic isolation from host environment
+            const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
+            const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
+            const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
+            const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
+            const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
 
-        argv_buf[argc] = self.zap_bin;
-        argc += 1;
-        argv_buf[argc] = "prompt";
-        argc += 1;
-        argv_buf[argc] = "--status";
-        argc += 1;
-        argv_buf[argc] = status_str;
-        argc += 1;
-        argv_buf[argc] = "--duration";
-        argc += 1;
-        argv_buf[argc] = duration_str;
-        argc += 1;
-        argv_buf[argc] = "--shell";
-        argc += 1;
-        argv_buf[argc] = shell_str;
-        argc += 1;
+            argv_buf[argc] = "env"; argc += 1;
+            argv_buf[argc] = home_env; argc += 1;
+            argv_buf[argc] = userprofile_env; argc += 1;
+            argv_buf[argc] = pwd_env; argc += 1;
+            argv_buf[argc] = xdg_env; argc += 1;
+            argv_buf[argc] = appdata_env; argc += 1;
+
+            if (self.has_config) {
+                const config_env = try std.fmt.allocPrint(alloc, "ZAP_CONFIG={s}/config.toml", .{self.tmp_dir});
+                argv_buf[argc] = config_env; argc += 1;
+            } else {
+                argv_buf[argc] = "ZAP_CONFIG="; argc += 1;
+            }
+
+            argv_buf[argc] = self.zap_bin; argc += 1;
+            argv_buf[argc] = "prompt"; argc += 1;
+            argv_buf[argc] = "--status"; argc += 1;
+            argv_buf[argc] = status_str; argc += 1;
+            argv_buf[argc] = "--duration"; argc += 1;
+            argv_buf[argc] = duration_str; argc += 1;
+            argv_buf[argc] = "--shell"; argc += 1;
+            argv_buf[argc] = shell_str; argc += 1;
+        }
 
         const io = std.testing.io;
         var child = std.process.spawn(io, .{
@@ -402,23 +460,43 @@ pub const Harness = struct {
         const current_home = self.custom_home orelse self.tmp_dir;
         const current_pwd = self.custom_cwd orelse self.tmp_dir;
 
-        const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
-        const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
-        const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
-        const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
-        const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
-
-        const full_argv = try alloc.alloc([]const u8, 7 + args.len);
+        var full_argv: [][]const u8 = undefined;
         var argc: usize = 0;
-        full_argv[argc] = "env"; argc += 1;
-        full_argv[argc] = home_env; argc += 1;
-        full_argv[argc] = userprofile_env; argc += 1;
-        full_argv[argc] = pwd_env; argc += 1;
-        full_argv[argc] = xdg_env; argc += 1;
-        full_argv[argc] = appdata_env; argc += 1;
-        full_argv[argc] = self.zap_bin; argc += 1;
-        @memcpy(full_argv[argc .. argc + args.len], args);
-        argc += args.len;
+
+        if (builtin.os.tag == .windows) {
+            setEnvWindows("HOME", current_home);
+            setEnvWindows("USERPROFILE", current_home);
+            setEnvWindows("PWD", current_pwd);
+            var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const xdg_val = std.fmt.bufPrint(&xdg_buf, "{s}\\.config", .{current_home}) catch null;
+            setEnvWindows("XDG_CONFIG_HOME", xdg_val);
+            var appdata_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const appdata_val = std.fmt.bufPrint(&appdata_buf, "{s}\\AppData", .{current_home}) catch null;
+            setEnvWindows("APPDATA", appdata_val);
+            setEnvWindows("ZAP_CONFIG", null);
+
+            full_argv = try alloc.alloc([]const u8, 1 + args.len);
+            full_argv[0] = self.zap_bin;
+            @memcpy(full_argv[1..], args);
+            argc = 1 + args.len;
+        } else {
+            const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
+            const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
+            const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
+            const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
+            const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
+
+            full_argv = try alloc.alloc([]const u8, 7 + args.len);
+            full_argv[argc] = "env"; argc += 1;
+            full_argv[argc] = home_env; argc += 1;
+            full_argv[argc] = userprofile_env; argc += 1;
+            full_argv[argc] = pwd_env; argc += 1;
+            full_argv[argc] = xdg_env; argc += 1;
+            full_argv[argc] = appdata_env; argc += 1;
+            full_argv[argc] = self.zap_bin; argc += 1;
+            @memcpy(full_argv[argc .. argc + args.len], args);
+            argc += args.len;
+        }
 
         const io = std.testing.io;
         var child = try std.process.spawn(io, .{

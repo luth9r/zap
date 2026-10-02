@@ -247,10 +247,10 @@ pub fn resolveConfigPathBuf(
     }
 
     // Universal fallback (~/.config/zap/zap.toml)
-    const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
-    if (lookupEnv(lookup_env, home_env)) |home| {
+    const home = lookupEnv(lookup_env, "HOME") orelse lookupEnv(lookup_env, "USERPROFILE");
+    if (home) |h| {
         const sep = if (builtin.os.tag == .windows) "\\" else "/";
-        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}zap.toml", .{ home, sep, sep, sep }) catch null;
+        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}zap.toml", .{ h, sep, sep, sep }) catch null;
     }
 
     return null;
@@ -293,11 +293,11 @@ pub fn resolveExistingConfigPath(
         }
     }
 
-    const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
-    if (lookupEnv(lookup_env, home_env)) |home| {
+    const home = lookupEnv(lookup_env, "HOME") orelse lookupEnv(lookup_env, "USERPROFILE");
+    if (home) |h| {
         const sep = if (builtin.os.tag == .windows) "\\" else "/";
         for (candidates) |filename| {
-            if (std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}{s}", .{ home, sep, sep, sep, filename })) |candidate| {
+            if (std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}{s}", .{ h, sep, sep, sep, filename })) |candidate| {
                 if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
                     var file = f;
                     file.close(io);
