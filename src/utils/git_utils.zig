@@ -26,6 +26,10 @@ pub const getGitState = git.getGitState;
 
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
+pub const getAheadBehind = git.getAheadBehind;
+pub const scanGitIndex = git.scanGitIndex;
+pub const GitFileCollector = git.GitFileCollector;
+pub const collectDetailedGitFiles = git.collectDetailedGitFiles;
 
 test "unit: parseHeadContent on regular branch" {
     const raw = "ref: refs/heads/main\n";

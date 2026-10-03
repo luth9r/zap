@@ -20,6 +20,31 @@ pub const Modifiers = struct {
     reset: bool = false,
 };
 
+pub const ModifierKind = enum {
+    bold,
+    dimmed,
+    italic,
+    underline,
+    blink,
+    inverted,
+    hidden,
+    strikethrough,
+    reset,
+};
+
+pub fn parseModifierToken(token: []const u8) ?ModifierKind {
+    if (std.ascii.eqlIgnoreCase(token, "bold")) return .bold;
+    if (std.ascii.eqlIgnoreCase(token, "dimmed") or std.ascii.eqlIgnoreCase(token, "dim")) return .dimmed;
+    if (std.ascii.eqlIgnoreCase(token, "italic")) return .italic;
+    if (std.ascii.eqlIgnoreCase(token, "underline") or std.ascii.eqlIgnoreCase(token, "underlined")) return .underline;
+    if (std.ascii.eqlIgnoreCase(token, "blink")) return .blink;
+    if (std.ascii.eqlIgnoreCase(token, "inverted") or std.ascii.eqlIgnoreCase(token, "invert")) return .inverted;
+    if (std.ascii.eqlIgnoreCase(token, "hidden")) return .hidden;
+    if (std.ascii.eqlIgnoreCase(token, "strikethrough")) return .strikethrough;
+    if (std.ascii.eqlIgnoreCase(token, "reset")) return .reset;
+    return null;
+}
+
 pub const Style = struct {
     fg: ColorType = .none,
     bg: ColorType = .none,
@@ -41,25 +66,18 @@ pub const Style = struct {
                 continue;
             }
 
-            // Check modifiers
-            if (std.ascii.eqlIgnoreCase(token, "bold")) {
-                style.modifiers.bold = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "dimmed") or std.ascii.eqlIgnoreCase(token, "dim")) {
-                style.modifiers.dimmed = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "italic")) {
-                style.modifiers.italic = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "underline") or std.ascii.eqlIgnoreCase(token, "underlined")) {
-                style.modifiers.underline = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "blink")) {
-                style.modifiers.blink = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "inverted") or std.ascii.eqlIgnoreCase(token, "invert")) {
-                style.modifiers.inverted = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "hidden")) {
-                style.modifiers.hidden = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "strikethrough")) {
-                style.modifiers.strikethrough = true;
-            } else if (std.ascii.eqlIgnoreCase(token, "reset")) {
-                style.modifiers.reset = true;
+            if (parseModifierToken(token)) |mod| {
+                switch (mod) {
+                    .bold => style.modifiers.bold = true,
+                    .dimmed => style.modifiers.dimmed = true,
+                    .italic => style.modifiers.italic = true,
+                    .underline => style.modifiers.underline = true,
+                    .blink => style.modifiers.blink = true,
+                    .inverted => style.modifiers.inverted = true,
+                    .hidden => style.modifiers.hidden = true,
+                    .strikethrough => style.modifiers.strikethrough = true,
+                    .reset => style.modifiers.reset = true,
+                }
             } else if (std.mem.startsWith(u8, token, "fg:") or std.mem.startsWith(u8, token, "FG:")) {
                 const color_val = token[3..];
                 if (parseColorToken(color_val, false)) |col| {
@@ -85,15 +103,7 @@ pub const Style = struct {
 
     pub fn isValidToken(token: []const u8) bool {
         if (std.ascii.eqlIgnoreCase(token, "none")) return true;
-        if (std.ascii.eqlIgnoreCase(token, "bold") or
-            std.ascii.eqlIgnoreCase(token, "dimmed") or std.ascii.eqlIgnoreCase(token, "dim") or
-            std.ascii.eqlIgnoreCase(token, "italic") or
-            std.ascii.eqlIgnoreCase(token, "underline") or std.ascii.eqlIgnoreCase(token, "underlined") or
-            std.ascii.eqlIgnoreCase(token, "blink") or
-            std.ascii.eqlIgnoreCase(token, "inverted") or std.ascii.eqlIgnoreCase(token, "invert") or
-            std.ascii.eqlIgnoreCase(token, "hidden") or
-            std.ascii.eqlIgnoreCase(token, "strikethrough") or
-            std.ascii.eqlIgnoreCase(token, "reset")) return true;
+        if (parseModifierToken(token) != null) return true;
 
         if (std.mem.startsWith(u8, token, "fg:") or std.mem.startsWith(u8, token, "FG:")) {
             const color_val = token[3..];

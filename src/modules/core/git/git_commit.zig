@@ -3,6 +3,7 @@ const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
 pub const is_git_dependent: bool = true;
 
@@ -69,6 +70,50 @@ pub fn render(
             .{ .name = .tag, .value = tag_str },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+
+    if (git_dir_opt == null) {
+        if (dctx.json) {
+            try writer.writeAll("{\"module\": \"git_commit\", \"in_git_repo\": false}\n");
+        } else {
+            try writer.writeAll("⚡ Module: git_commit\n  In Git Repo: false\n\n");
+        }
+        return;
+    }
+
+    const git_dir = git_dir_opt.?;
+    var head_buf: [512]u8 = undefined;
+    var ref_buf: [512]u8 = undefined;
+    const commit_info = git_utils.getGitCommit(io, git_dir, &head_buf, &ref_buf);
+
+    if (commit_info) |c| {
+        if (dctx.json) {
+            try writer.print(
+                \\{{ "module": "git_commit", "hash": "{s}", "tag": "{s}", "is_detached": {} }}
+                \\
+            , .{ c.hash, c.tag, c.is_detached });
+        } else {
+            try writer.print(
+                \\⚡ Module: git_commit
+                \\  Commit Hash: {s}
+                \\  Tag:         {s}
+                \\  Detached:    {}
+                \\
+            , .{ c.hash, if (c.tag.len > 0) c.tag else "none", c.is_detached });
+        }
+    } else {
+        if (dctx.json) {
+            try writer.writeAll("{\"module\": \"git_commit\", \"hash\": null}\n");
+        } else {
+            try writer.writeAll("⚡ Module: git_commit\n  Commit Hash: none\n\n");
+        }
+    }
 }
 
 pub const Harness = @import("../../../tests/harness.zig").Harness;

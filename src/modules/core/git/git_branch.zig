@@ -3,6 +3,7 @@ const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
 pub const is_git_dependent: bool = true;
 
@@ -70,6 +71,31 @@ pub fn render(
             .{ .name = .remote_branch, .value = "" },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const git_dir = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+
+    var branch_buf: [512]u8 = undefined;
+    const branch = if (git_dir) |gd| git_utils.getGitBranchFromDir(io, gd, &branch_buf) else null;
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "git_branch", "git_dir": "{s}", "branch": "{s}" }}
+            \\
+        , .{ git_dir orelse "", branch orelse "" });
+    } else {
+        try writer.print(
+            \\⚡ Module: git_branch
+            \\  In Git Repo: {}
+            \\  Git Dir:     {s}
+            \\  Branch:      {s}
+            \\
+        , .{ git_dir != null, git_dir orelse "none", branch orelse "none" });
+    }
 }
 
 pub const Harness = @import("../../../tests/harness.zig").Harness;
@@ -199,4 +225,3 @@ test "integration: git_branch with slashes and special characters" {
     const out = try h.collectAllShells();
     try Harness.expectContains(out, "feature/auth-v2-@beta");
 }
-

@@ -23,6 +23,7 @@ pub fn printHelp(writer: anytype) !void {
         \\    init <shell> --install  Install Zap prompt hook into shell configuration
         \\    validate [path]         Validate TOML configuration and format templates
         \\    list-modules            List all available prompt modules and their metadata
+        \\    debug [target]          Inspect internal diagnostic state (e.g. 'debug git')
         \\    help, --help, -h        Print this help message
         \\    version, --version, -v  Print version information
         \\
@@ -32,12 +33,23 @@ pub fn printHelp(writer: anytype) !void {
         \\    --shell, -sh <shell>      Target shell (bash, zsh, fish, powershell, generic)
         \\    --config, -c <path>       Custom path to configuration file (default: ~/.config/zap/zap.toml)
         \\
+        \\OPTIONS for 'debug':
+        \\    --verbose, -v           Show detailed diagnostic breakdown (index entries, hashes, timing)
+        \\    --json                  Output diagnostic data in JSON format
+        \\    --output, -o <path>     Write output directly to specified file
+        \\
         \\EXAMPLES:
         \\    zap prompt --status 0 --duration 1500 --shell bash
         \\    zap init zsh
         \\    zap init bash --install
         \\    zap validate
         \\    zap validate ~/.config/zap/zap.toml
+        \\    zap debug git
+        \\    zap debug git --json -o report.json
+        \\    zap debug config
+        \\    zap debug env
+        \\    zap debug bench
+        \\    zap debug bench --json
         \\
     );
 }

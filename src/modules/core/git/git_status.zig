@@ -4,6 +4,7 @@ const git_utils = @import("../../../utils/git_utils.zig");
 const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
 pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, ahead_behind };
 
@@ -178,6 +179,65 @@ pub fn render(
             .{ .name = .deleted, .value = if (info.deleted) config.deleted else "" },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+
+    if (git_dir_opt == null) {
+        if (dctx.json) {
+            try writer.writeAll("{\"module\": \"git_status\", \"in_git_repo\": false}\n");
+        } else {
+            try writer.writeAll("⚡ Module: git_status\n  In Git Repo: false\n\n");
+        }
+        return;
+    }
+
+    const git_dir = git_dir_opt.?;
+    var head_buf: [512]u8 = undefined;
+    const branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf);
+    const info = git_utils.getGitStatusForDir(io, dctx.prompt.cwd, git_dir, branch);
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "git_status", "staged": {}, "modified": {}, "untracked": {}, "deleted": {}, "stashed": {}, "conflicted": {}, "ahead": {d}, "behind": {d} }}
+            \\
+        , .{
+            info.staged,
+            info.modified,
+            info.untracked,
+            info.deleted,
+            info.stashed,
+            info.conflicted,
+            info.ahead,
+            info.behind,
+        });
+    } else {
+        try writer.print(
+            \\⚡ Module: git_status
+            \\  Staged (+):     {}
+            \\  Modified (!):   {}
+            \\  Untracked (?):  {}
+            \\  Deleted (✘):    {}
+            \\  Stashed ($):    {}
+            \\  Conflicted (=): {}
+            \\  Ahead (⇡):      {d}
+            \\  Behind (⇣):     {d}
+            \\
+        , .{
+            info.staged,
+            info.modified,
+            info.untracked,
+            info.deleted,
+            info.stashed,
+            info.conflicted,
+            info.ahead,
+            info.behind,
+        });
+    }
 }
 
 test "unit: formatAllStatus and formatAheadBehind" {

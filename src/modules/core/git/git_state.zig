@@ -3,6 +3,7 @@ const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
 pub const is_git_dependent: bool = true;
 
@@ -69,6 +70,42 @@ pub fn render(
             .{ .name = .progress_total, .value = state_res.progress_total },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+
+    if (git_dir_opt == null) {
+        if (dctx.json) {
+            try writer.writeAll("{\"module\": \"git_state\", \"in_git_repo\": false}\n");
+        } else {
+            try writer.writeAll("⚡ Module: git_state\n  In Git Repo: false\n\n");
+        }
+        return;
+    }
+
+    const git_dir = git_dir_opt.?;
+    var cur_buf: [32]u8 = undefined;
+    var total_buf: [32]u8 = undefined;
+    const state_res = git_utils.getGitState(io, git_dir, &cur_buf, &total_buf);
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "git_state", "state": "{s}", "step": "{s}", "total": "{s}" }}
+            \\
+        , .{ @tagName(state_res.state_type), state_res.progress_current, state_res.progress_total });
+    } else {
+        try writer.print(
+            \\⚡ Module: git_state
+            \\  State:    {s}
+            \\  Step:     {s}
+            \\  Total:    {s}
+            \\
+        , .{ @tagName(state_res.state_type), if (state_res.progress_current.len > 0) state_res.progress_current else "none", if (state_res.progress_total.len > 0) state_res.progress_total else "none" });
+    }
 }
 
 pub const Harness = @import("../../../tests/harness.zig").Harness;

@@ -13,6 +13,7 @@ pub const Config = ZigLangModule.Config;
 pub const ZigLangConfig = Config;
 pub const render = ZigLangModule.render;
 pub const buffer_size = ZigLangModule.buffer_size;
+pub const debug = ZigLangModule.debug;
 
 pub const Harness = @import("../../tests/harness.zig").Harness;
 

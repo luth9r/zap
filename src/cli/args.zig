@@ -3,6 +3,7 @@ const init_mod = @import("../init/root.zig");
 const validate_cmd = @import("commands/validate.zig");
 const init_cmd = @import("commands/init.zig");
 const prompt_cmd = @import("commands/prompt.zig");
+const debug_cmd = @import("commands/debug.zig");
 
 pub const Command = union(enum) {
     help,
@@ -11,6 +12,48 @@ pub const Command = union(enum) {
     validate: validate_cmd.Args,
     init: init_cmd.Args,
     prompt: prompt_cmd.Args,
+    debug: debug_cmd.Args,
+};
+
+pub const Subcommand = enum {
+    help,
+    version,
+    @"list-modules",
+    validate,
+    init,
+    debug,
+    prompt,
+    flag_or_unknown,
+
+    pub fn fromArg(arg: []const u8) Subcommand {
+        if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return .help;
+        if (std.mem.eql(u8, arg, "version") or std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) return .version;
+        if (std.mem.eql(u8, arg, "list-modules")) return .@"list-modules";
+        if (std.mem.eql(u8, arg, "validate")) return .validate;
+        if (std.mem.eql(u8, arg, "init")) return .init;
+        if (std.mem.eql(u8, arg, "debug")) return .debug;
+        if (std.mem.eql(u8, arg, "prompt")) return .prompt;
+        return .flag_or_unknown;
+    }
+};
+
+const PromptFlag = enum {
+    help,
+    version,
+    status,
+    duration,
+    shell,
+    config,
+
+    pub fn parse(flag: []const u8) ?PromptFlag {
+        if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) return .help;
+        if (std.mem.eql(u8, flag, "--version") or std.mem.eql(u8, flag, "-v")) return .version;
+        if (std.mem.eql(u8, flag, "--status") or std.mem.eql(u8, flag, "-s")) return .status;
+        if (std.mem.eql(u8, flag, "--duration") or std.mem.eql(u8, flag, "-d") or std.mem.eql(u8, flag, "--cmd-duration")) return .duration;
+        if (std.mem.eql(u8, flag, "--shell") or std.mem.eql(u8, flag, "-sh")) return .shell;
+        if (std.mem.eql(u8, flag, "--config") or std.mem.eql(u8, flag, "-c")) return .config;
+        return null;
+    }
 };
 
 pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Command {
@@ -29,99 +72,133 @@ pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Comma
         return p;
     };
 
-    if (std.mem.eql(u8, first_arg, "--help") or std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "help")) {
-        return Command{ .help = {} };
-    }
-
-    if (std.mem.eql(u8, first_arg, "--version") or std.mem.eql(u8, first_arg, "-v") or std.mem.eql(u8, first_arg, "version")) {
-        return Command{ .version = {} };
-    }
-
-    if (std.mem.eql(u8, first_arg, "list-modules")) {
-        return Command{ .list_modules = {} };
-    }
-
-    if (std.mem.eql(u8, first_arg, "validate")) {
-        var config_path: ?[]const u8 = null;
-        while (args.next()) |arg| {
-            if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "-c")) {
-                config_path = args.next();
-            } else if (!std.mem.startsWith(u8, arg, "-")) {
-                config_path = arg;
-            } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-                return Command{ .help = {} };
+    const subcmd = Subcommand.fromArg(first_arg);
+    return switch (subcmd) {
+        .help => Command{ .help = {} },
+        .version => Command{ .version = {} },
+        .@"list-modules" => Command{ .list_modules = {} },
+        .validate => try parseValidateArgs(&args),
+        .init => try parseInitArgs(&args, exe_name),
+        .debug => try parseDebugArgs(&args),
+        .prompt => try parsePromptArgs(&args, init, null),
+        .flag_or_unknown => {
+            if (std.mem.startsWith(u8, first_arg, "-")) {
+                return try parsePromptArgs(&args, init, first_arg);
             }
+            var err_buf: [256]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "✖ Error: unknown command '{s}'. Run 'zap --help' for available commands.\n", .{first_arg}) catch "Error: unknown command.\n";
+            _ = std.Io.File.stderr().writeStreamingAll(init.io, err_msg) catch {};
+            return error.InvalidArgs;
+        },
+    };
+}
+
+fn parseValidateArgs(args: anytype) !Command {
+    var config_path: ?[]const u8 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "-c")) {
+            config_path = args.next();
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            config_path = arg;
+        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            return Command{ .help = {} };
         }
-        return Command{ .validate = .{ .config_path = config_path } };
     }
+    return Command{ .validate = .{ .config_path = config_path } };
+}
 
-    if (std.mem.eql(u8, first_arg, "init")) {
-        var target_shell: init_mod.Shell = .generic;
-        var install_flag = false;
+fn parseInitArgs(args: anytype, exe_name: []const u8) !Command {
+    var target_shell: init_mod.Shell = .generic;
+    var install_flag = false;
 
-        while (args.next()) |arg| {
-            if (std.mem.eql(u8, arg, "--install") or std.mem.eql(u8, arg, "-i")) {
-                install_flag = true;
-            } else if (!std.mem.startsWith(u8, arg, "-")) {
-                if (init_mod.Shell.parse(arg)) |sh| {
-                    target_shell = sh;
-                }
-            } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-                return Command{ .help = {} };
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--install") or std.mem.eql(u8, arg, "-i")) {
+            install_flag = true;
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            if (init_mod.Shell.parse(arg)) |sh| {
+                target_shell = sh;
             }
+        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            return Command{ .help = {} };
         }
-
-        return Command{ .init = .{
-            .shell = target_shell,
-            .exe_name = exe_name,
-            .install = install_flag,
-        } };
     }
 
-    const is_prompt_command = std.mem.eql(u8, first_arg, "prompt");
-    const is_flag = std.mem.startsWith(u8, first_arg, "-");
+    return Command{ .init = .{
+        .shell = target_shell,
+        .exe_name = exe_name,
+        .install = install_flag,
+    } };
+}
 
-    if (!is_prompt_command and !is_flag) {
-        var err_buf: [256]u8 = undefined;
-        const err_msg = std.fmt.bufPrint(&err_buf, "✖ Error: unknown command '{s}'. Run 'zap --help' for available commands.\n", .{first_arg}) catch "Error: unknown command.\n";
-        _ = std.Io.File.stderr().writeStreamingAll(init.io, err_msg) catch {};
-        return error.InvalidArgs;
+fn parseDebugArgs(args: anytype) !Command {
+    var module_name: ?[]const u8 = null;
+    var json_flag = false;
+    var verbose_flag = false;
+    var output_path: ?[]const u8 = null;
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_flag = true;
+        } else if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
+            verbose_flag = true;
+        } else if (std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
+            output_path = args.next();
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            module_name = arg;
+        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            return Command{ .help = {} };
+        }
     }
 
+    return Command{ .debug = .{
+        .module_name = module_name,
+        .json = json_flag,
+        .verbose = verbose_flag,
+        .output_path = output_path,
+    } };
+}
+
+fn parsePromptArgs(
+    args: anytype,
+    init: std.process.Init,
+    initial_arg: ?[]const u8,
+) !Command {
     var res = Command{ .prompt = .{} };
     var positional_idx: usize = 0;
 
-    var current_arg: ?[]const u8 = first_arg;
-    if (is_prompt_command) {
-        current_arg = args.next();
-    }
+    var current_arg = initial_arg orelse args.next();
 
     while (current_arg) |arg| : (current_arg = args.next()) {
-        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            return Command{ .help = {} };
-        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
-            return Command{ .version = {} };
-        } else if (std.mem.eql(u8, arg, "--status") or std.mem.eql(u8, arg, "-s")) {
-            if (args.next()) |val| {
-                res.prompt.status_code = std.fmt.parseInt(u8, val, 10) catch {
-                    printInvalidIntError(init.io, "--status", val);
-                    return error.InvalidArgs;
-                };
-            }
-        } else if (std.mem.eql(u8, arg, "--duration") or std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--cmd-duration")) {
-            if (args.next()) |val| {
-                res.prompt.cmd_duration = std.fmt.parseInt(u64, val, 10) catch {
-                    printInvalidIntError(init.io, "--duration", val);
-                    return error.InvalidArgs;
-                };
-            }
-        } else if (std.mem.eql(u8, arg, "--shell") or std.mem.eql(u8, arg, "-sh")) {
-            if (args.next()) |val| {
-                res.prompt.shell = init_mod.Shell.parse(val) orelse .generic;
-            }
-        } else if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "-c")) {
-            if (args.next()) |val| {
-                res.prompt.config_path = val;
+        if (PromptFlag.parse(arg)) |flag| {
+            switch (flag) {
+                .help => return Command{ .help = {} },
+                .version => return Command{ .version = {} },
+                .status => {
+                    if (args.next()) |val| {
+                        res.prompt.status_code = std.fmt.parseInt(u8, val, 10) catch {
+                            printInvalidIntError(init.io, "--status", val);
+                            return error.InvalidArgs;
+                        };
+                    }
+                },
+                .duration => {
+                    if (args.next()) |val| {
+                        res.prompt.cmd_duration = std.fmt.parseInt(u64, val, 10) catch {
+                            printInvalidIntError(init.io, "--duration", val);
+                            return error.InvalidArgs;
+                        };
+                    }
+                },
+                .shell => {
+                    if (args.next()) |val| {
+                        res.prompt.shell = init_mod.Shell.parse(val) orelse .generic;
+                    }
+                },
+                .config => {
+                    if (args.next()) |val| {
+                        res.prompt.config_path = val;
+                    }
+                },
             }
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             if (positional_idx == 0) {

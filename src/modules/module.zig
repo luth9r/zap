@@ -2,7 +2,9 @@ const std = @import("std");
 const formatter = @import("../engine/formatter.zig");
 const git_utils = @import("../utils/git_utils.zig");
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
+
 pub const PromptContext = @import("../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../engine/context.zig").DebugContext;
 
 /// Validates that a type conforms to the Zap Module compile-time interface.
 /// A valid module must provide:
@@ -127,6 +129,66 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
                 },
             });
         }
+
+        pub fn debug(writer: anytype, dctx: DebugContext) !void {
+            const io = dctx.prompt.io orelse return;
+            const repo_root = if (dctx.prompt.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            const match_detail = fs.detectDetailed(io, dctx.prompt.cwd, dctx.prompt.home, repo_root, spec.files, spec.extensions, spec.max_scan_depth);
+
+            if (dctx.json) {
+                try writer.print(
+                    \\{{ "module": "{s}", "detected": {}, "verbose": {}, "matched": "{s}", "matched_path": "{s}", "depth": {d}, "files": [
+                , .{
+                    spec.name,
+                    match_detail.matched,
+                    dctx.verbose,
+                    match_detail.getMatchedFile(),
+                    match_detail.getMatchedPath(),
+                    match_detail.depth,
+                });
+                for (spec.files, 0..) |file, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("\"{s}\"", .{file});
+                }
+                try writer.writeAll("], \"extensions\": [");
+                for (spec.extensions, 0..) |ext, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("\"{s}\"", .{ext});
+                }
+                try writer.print("], \"cwd\": \"{s}\" }}\n", .{dctx.prompt.cwd});
+            } else {
+                try writer.print(
+                    \\⚡ Module: {s}
+                    \\  Detected:   {}
+                , .{ spec.name, match_detail.matched });
+
+                if (dctx.verbose or match_detail.matched) {
+                    if (match_detail.matched) {
+                        try writer.print(
+                            \\
+                            \\  Matched:    {s} (depth: {d})
+                            \\  Path:       {s}
+                        , .{ match_detail.getMatchedFile(), match_detail.depth, match_detail.getMatchedPath() });
+                    }
+                }
+
+                try writer.print(
+                    \\
+                    \\  CWD:        {s}
+                    \\  Files:      
+                , .{ dctx.prompt.cwd });
+                for (spec.files, 0..) |file, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("{s}", .{file});
+                }
+                try writer.writeAll("\n  Extensions: ");
+                for (spec.extensions, 0..) |ext, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("{s}", .{ext});
+                }
+                try writer.writeAll("\n\n");
+            }
+        }
     };
 }
 
@@ -183,6 +245,56 @@ pub fn GenericFileModule(comptime spec: FileSpec) type {
                     .{ .name = .style, .value = config.style },
                 },
             });
+        }
+
+        pub fn debug(writer: anytype, dctx: DebugContext) !void {
+            const io = dctx.prompt.io orelse return;
+            const repo_root = if (dctx.prompt.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            const match_detail = fs.detectDetailed(io, dctx.prompt.cwd, dctx.prompt.home, repo_root, spec.files, &.{}, spec.max_scan_depth);
+
+            if (dctx.json) {
+                try writer.print(
+                    \\{{ "module": "{s}", "detected": {}, "verbose": {}, "matched": "{s}", "matched_path": "{s}", "depth": {d}, "files": [
+                , .{
+                    spec.name,
+                    match_detail.matched,
+                    dctx.verbose,
+                    match_detail.getMatchedFile(),
+                    match_detail.getMatchedPath(),
+                    match_detail.depth,
+                });
+                for (spec.files, 0..) |file, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("\"{s}\"", .{file});
+                }
+                try writer.print("], \"cwd\": \"{s}\" }}\n", .{dctx.prompt.cwd});
+            } else {
+                try writer.print(
+                    \\⚡ Module: {s}
+                    \\  Detected:   {}
+                , .{ spec.name, match_detail.matched });
+
+                if (dctx.verbose or match_detail.matched) {
+                    if (match_detail.matched) {
+                        try writer.print(
+                            \\
+                            \\  Matched:    {s} (depth: {d})
+                            \\  Path:       {s}
+                        , .{ match_detail.getMatchedFile(), match_detail.depth, match_detail.getMatchedPath() });
+                    }
+                }
+
+                try writer.print(
+                    \\
+                    \\  CWD:        {s}
+                    \\  Files:      
+                , .{ dctx.prompt.cwd });
+                for (spec.files, 0..) |file, idx| {
+                    if (idx > 0) try writer.writeAll(", ");
+                    try writer.print("{s}", .{file});
+                }
+                try writer.writeAll("\n\n");
+            }
         }
     };
 }

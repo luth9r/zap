@@ -54,8 +54,11 @@ pub const getGitState = state.getGitState;
 
 pub const ahead_behind = @import("ahead_behind.zig");
 pub const index = @import("index.zig");
+pub const details = @import("details.zig");
 pub const getAheadBehind = ahead_behind.getAheadBehind;
 pub const scanGitIndex = index.scanGitIndex;
+pub const GitFileCollector = details.GitFileCollector;
+pub const collectDetailedGitFiles = details.collectDetailedGitFiles;
 
 /// Retrieves git status info for the repository by invoking git child process.
 pub fn getGitStatus(io: std.Io, git_dir: []const u8, branch_name: ?[]const u8) GitStatusInfo {

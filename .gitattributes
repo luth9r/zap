@@ -1,0 +1,3 @@
+docs/** linguist-documentation
+*.json linguist-generated
+*-lock.json linguist-generated

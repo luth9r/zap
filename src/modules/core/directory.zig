@@ -3,6 +3,7 @@ const formatter = @import("../../engine/formatter.zig");
 const path_utils = @import("../../utils/path_utils.zig");
 
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../engine/context.zig").DebugContext;
 
 pub const buffer_size: usize = std.fs.max_path_bytes + 256;
 
@@ -82,6 +83,28 @@ pub fn render(
             .{ .name = .read_only_style, .value = config.read_only_style },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const is_read_only = if (dctx.prompt.io) |io|
+        if (std.Io.Dir.accessAbsolute(io, dctx.prompt.cwd, .{ .write = true })) false else |_| true
+    else
+        false;
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "directory", "cwd": "{s}", "home": "{s}", "read_only": {} }}
+            \\
+        , .{ dctx.prompt.cwd, dctx.prompt.home, is_read_only });
+    } else {
+        try writer.print(
+            \\⚡ Module: directory
+            \\  CWD:       {s}
+            \\  Home:      {s}
+            \\  Read-Only: {}
+            \\
+        , .{ dctx.prompt.cwd, dctx.prompt.home, is_read_only });
+    }
 }
 
 pub const Harness = @import("../../tests/harness.zig").Harness;

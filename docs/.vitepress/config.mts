@@ -40,7 +40,8 @@ export default defineConfig({
           { text: 'Installation & Setup', link: '/guide/getting-started' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Styling & Colors', link: '/guide/styling' },
-          { text: 'Template Engine', link: '/guide/templates' }
+          { text: 'Template Engine', link: '/guide/templates' },
+          { text: 'Debugging & Diagnostics', link: '/guide/debugging' }
         ]
       },
       {

@@ -152,6 +152,33 @@ Full configuration options, module references, styling, and template engine guid
 
 ---
 
+## CLI Commands & Diagnostics
+
+Zap includes a suite of built-in developer tools and diagnostics:
+
+```bash
+# Render prompt manually (with custom status / duration)
+zap prompt --status 0 --duration 1500 --shell zsh
+
+# Generate shell integration scripts
+zap init <bash|zsh|fish|powershell>
+
+# Validate TOML configuration file
+zap validate --config ~/.config/zap/config.toml
+
+# List all compiled-in prompt modules
+zap list-modules
+
+# Run diagnostics and benchmark rendering speed
+zap debug bench                    # 100-iteration benchmark & per-module profile
+zap debug git --verbose            # Detailed git status with modified/untracked files
+zap debug env                      # Shell, terminal TrueColor, and rc integration checks
+zap debug <module> --verbose       # Inspect trigger files and directory scan depth
+zap debug all --json               # Output complete diagnostics in JSON format
+```
+
+---
+
 ## License
 
 [MIT](LICENSE)

@@ -12,3 +12,8 @@ pub const PromptContext = struct {
     git_dir: ?[]const u8 = null,
 };
 
+pub const DebugContext = struct {
+    prompt: PromptContext,
+    json: bool = false,
+    verbose: bool = false,
+};
