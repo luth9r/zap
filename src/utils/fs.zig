@@ -35,8 +35,9 @@ pub fn hasFileWithExtension(
         defer d.close(io);
         var iter = d.iterate();
         while (iter.next(io) catch null) |entry| {
+            if (entry.kind == .directory or entry.name.len == 0 or entry.name[0] == '.') continue;
             inline for (extensions) |ext| {
-                if (std.mem.endsWith(u8, entry.name, ext)) {
+                if (entry.name.len > ext.len and std.mem.endsWith(u8, entry.name, ext)) {
                     return true;
                 }
             }
@@ -66,10 +67,10 @@ pub fn scanParentDirsForFiles(
             return true;
         }
 
+        if (std.mem.eql(u8, p, "/") or std.mem.eql(u8, p, home_dir)) break;
         if (repo_root) |root| {
             if (std.mem.eql(u8, p, root) or !std.mem.startsWith(u8, p, root)) break;
         }
-        if (std.mem.eql(u8, p, home_dir) or std.mem.eql(u8, p, "/") or p.len == 0) break;
 
         curr_dir = std.fs.path.dirname(p);
     }
@@ -160,8 +161,9 @@ pub fn detectDetailed(
             defer d.close(io);
             var iter = d.iterate();
             while (iter.next(io) catch null) |entry| {
+                if (entry.kind == .directory or entry.name.len == 0 or entry.name[0] == '.') continue;
                 inline for (extensions) |ext| {
-                    if (std.mem.endsWith(u8, entry.name, ext)) {
+                    if (entry.name.len > ext.len and std.mem.endsWith(u8, entry.name, ext)) {
                         res.matched = true;
                         const flen = @min(entry.name.len, res.matched_file.len);
                         @memcpy(res.matched_file[0..flen], entry.name[0..flen]);
@@ -202,10 +204,10 @@ pub fn detectDetailed(
                 } else |_| {}
             }
 
+            if (std.mem.eql(u8, p, "/") or std.mem.eql(u8, p, home)) break;
             if (repo_root) |root| {
                 if (std.mem.eql(u8, p, root) or !std.mem.startsWith(u8, p, root)) break;
             }
-            if (std.mem.eql(u8, p, home) or std.mem.eql(u8, p, "/") or p.len == 0) break;
 
             curr_dir = std.fs.path.dirname(p);
         }

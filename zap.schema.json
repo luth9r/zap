@@ -14,6 +14,11 @@
       "default": "$directory$character",
       "description": "Root prompt format string controlling module layout, inline styling blocks [content](style), and escaped characters (e.g. \\$ for literal '$')"
     },
+    "right_format": {
+      "type": "string",
+      "default": "",
+      "description": "Right-aligned prompt format string rendered when 'zap prompt --right' is invoked (Fish fish_right_prompt and Zsh RPROMPT)"
+    },
     "add_newline": {
       "type": "boolean",
       "default": true,
@@ -100,6 +105,11 @@
           "type": "string",
           "default": "…",
           "description": "Symbol appended when branch name is truncated"
+        },
+        "always_show_remote": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always populate $remote_branch even when it matches the local branch name"
         },
         "disabled": {
           "type": "boolean",
@@ -366,24 +376,67 @@
       }
     },
     "zig_lang": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Zig language indicator (↯)"
+    },
+    "python": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Python language indicator ()"
+    },
+    "golang": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Go language indicator ()"
+    },
+    "rust": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Rust language indicator (󱘗)"
+    },
+    "nodejs": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Node.js / TypeScript language indicator ()"
+    },
+    "dotnet": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": ".NET SDK / C# / F# indicator (󰪮)"
+    },
+    "java": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Java / JVM indicator ()"
+    },
+    "c": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "C / C++ indicator ()"
+    },
+    "lua": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Lua indicator ()"
+    },
+    "nix": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Nix flake / shell indicator ()"
+    },
+    "docker": {
+      "$ref": "#/definitions/LanguageModule",
+      "description": "Docker / Compose context indicator ()"
+    }
+  },
+  "definitions": {
+    "LanguageModule": {
       "type": "object",
-      "description": "Zig language indicator",
       "additionalProperties": false,
       "properties": {
         "format": {
           "type": "string",
           "default": "[$symbol$version]($style) ",
-          "description": "Format template for the zig_lang module"
+          "description": "Format template for the language module"
         },
         "symbol": {
           "type": "string",
-          "default": "↯ ",
-          "description": "Symbol preceding the zig version indicator"
+          "description": "Symbol preceding the language version indicator"
         },
         "style": {
           "$ref": "#/definitions/Style",
-          "default": "bold yellow",
-          "description": "Style string for the zig indicator"
+          "description": "Style string for the language indicator"
         },
         "version": {
           "type": "string",
@@ -393,12 +446,10 @@
         "disabled": {
           "type": "boolean",
           "default": false,
-          "description": "Disables the zig_lang module"
+          "description": "Disables the language module"
         }
       }
-    }
-  },
-  "definitions": {
+    },
     "Style": {
       "type": "string",
       "description": "Style string combining modifiers, foreground/background colors, 8-bit ANSI (0-255), and 24-bit TrueColor Hex (#RGB / #RRGGBB). Examples: 'bold cyan', 'bold italic fg:#50fa7b bg:#282a36', 'underline bg:#bf5700 fg:white', '240', 'bold fg:27'.",
