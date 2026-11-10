@@ -141,3 +141,87 @@ pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext
         });
     }
 }
+
+pub fn printShellDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+    const init_mod = @import("../../../init/root.zig");
+
+    const shell_env = init.environ_map.get("SHELL") orelse "";
+    const shell_name = if (shell_env.len > 0) std.fs.path.basename(shell_env) else "unknown";
+
+    var bash_hook_path: [std.fs.max_path_bytes]u8 = undefined;
+    const bash_rc = std.fmt.bufPrint(&bash_hook_path, "{s}/.bashrc", .{dctx.prompt.home}) catch "";
+    const bash_hook = checkFileContains(io, bash_rc, "zap init bash") or checkFileContains(io, bash_rc, "zap prompt");
+
+    var zsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
+    const zsh_rc = std.fmt.bufPrint(&zsh_hook_path, "{s}/.zshrc", .{dctx.prompt.home}) catch "";
+    const zsh_hook = checkFileContains(io, zsh_rc, "zap init zsh") or checkFileContains(io, zsh_rc, "zap prompt");
+
+    var fish_hook_path: [std.fs.max_path_bytes]u8 = undefined;
+    const fish_rc = std.fmt.bufPrint(&fish_hook_path, "{s}/.config/fish/config.fish", .{dctx.prompt.home}) catch "";
+    const fish_hook = checkFileContains(io, fish_rc, "zap init fish") or checkFileContains(io, fish_rc, "zap prompt");
+
+    var pwsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
+    const pwsh_rc = std.fmt.bufPrint(&pwsh_hook_path, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{dctx.prompt.home}) catch "";
+    const pwsh_hook = checkFileContains(io, pwsh_rc, "zap init powershell") or checkFileContains(io, pwsh_rc, "zap prompt");
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "target": "shell", "detected_shell": "{s}", "shell_path": "{s}", "hooks": {{ "bash": {{ "installed": {}, "rc_path": "{s}", "right_prompt": false }}, "zsh": {{ "installed": {}, "rc_path": "{s}", "right_prompt": true }}, "fish": {{ "installed": {}, "rc_path": "{s}", "right_prompt": true }}, "powershell": {{ "installed": {}, "rc_path": "{s}", "right_prompt": false }} }} }}
+            \\
+        , .{
+            shell_name,
+            shell_env,
+            bash_hook,
+            bash_rc,
+            zsh_hook,
+            zsh_rc,
+            fish_hook,
+            fish_rc,
+            pwsh_hook,
+            pwsh_rc,
+        });
+        return;
+    }
+
+    try writer.print(
+        \\⚡ Zap Shell Integration Inspector
+        \\
+        \\Current Session:
+        \\  Detected Shell:    {s} ({s})
+        \\
+        \\Supported Shells & Hook Status:
+        \\  {s} bash        {s:<16} RC: {s}
+        \\                  Features: first-prompt --no-newline, duration tracking, \[...\] escapes
+        \\  {s} zsh         {s:<16} RC: {s}
+        \\                  Features: first-prompt --no-newline, RPROMPT (--right), %{{...%}} escapes
+        \\  {s} fish        {s:<16} RC: {s}
+        \\                  Features: first-prompt --no-newline, fish_right_prompt (--right), $CMD_DURATION
+        \\  {s} powershell  {s:<16} RC: {s}
+        \\                  Features: first-prompt --no-newline, Clear-Host wrapper, execution history timer
+        \\
+    , .{
+        shell_name,
+        if (shell_env.len > 0) shell_env else "none",
+        if (bash_hook) "✔" else "·",
+        if (bash_hook) "Installed" else "Not installed",
+        bash_rc,
+        if (zsh_hook) "✔" else "·",
+        if (zsh_hook) "Installed" else "Not installed",
+        zsh_rc,
+        if (fish_hook) "✔" else "·",
+        if (fish_hook) "Installed" else "Not installed",
+        fish_rc,
+        if (pwsh_hook) "✔" else "·",
+        if (pwsh_hook) "Installed" else "Not installed",
+        pwsh_rc,
+    });
+
+    if (dctx.verbose) {
+        const parsed_sh = init_mod.Shell.parse(shell_name) orelse .fish;
+        try writer.print("\nGenerated Init Script Preview ({s}):\n----------------------------------------\n", .{@tagName(parsed_sh)});
+        try init_mod.renderInitScript(writer, parsed_sh, "zap");
+        try writer.writeAll("----------------------------------------\n");
+    }
+}
+

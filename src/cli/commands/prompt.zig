@@ -12,6 +12,7 @@ pub const Args = struct {
     shell: init_mod.Shell = .generic,
     config_path: ?[]const u8 = null,
     no_newline: bool = false,
+    right: bool = false,
 };
 
 pub fn execute(init: std.process.Init, prompt_args: Args) !void {
@@ -38,7 +39,11 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
         toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
     }
 
-    if (prompt_args.no_newline) {
+    if (prompt_args.right) {
+        if (config.right_format.len == 0) return;
+        config.format = config.right_format;
+        config.add_newline = false;
+    } else if (prompt_args.no_newline) {
         config.add_newline = false;
     }
 
@@ -99,6 +104,16 @@ test "integration: zap prompt CLI flags support" {
     );
     const res_no_nl = try h.execZap(&.{ "prompt", "--no-newline", "--config", "newline.toml" });
     try testing.expect(res_no_nl.len > 0 and res_no_nl[0] != '\n');
+
+    // Test --right renders right_format without leading newline
+    try h.writeFile("right.toml",
+        \\format = "$character"
+        \\right_format = "[RPROMPT_OK](bold cyan)"
+        \\add_newline = true
+    );
+    const res_right = try h.execZap(&.{ "prompt", "--right", "--config", "right.toml" });
+    try Harness.expectContains(res_right, "RPROMPT_OK");
+    try testing.expect(res_right[0] != '\n');
 }
 
 test "integration: zap prompt respects CMD_DURATION environment variable" {

@@ -32,10 +32,25 @@ pub fn printHelp(writer: anytype) !void {
         \\    --duration, -d <ms>       Execution duration of the previous command in ms
         \\    --shell, -sh <shell>      Target shell (bash, zsh, fish, powershell, generic)
         \\    --config, -c <path>       Custom path to configuration file (default: ~/.config/zap/zap.toml)
+        \\    --no-newline              Suppress leading newline (used for first prompt / after clear)
+        \\    --right, -r               Render right-aligned prompt using 'right_format'
+        \\
+        \\TARGETS for 'debug':
+        \\    all, modules            Inspect diagnostic state of all registered modules (default)
+        \\    <module>                Inspect a single module (e.g. 'directory', 'git_status', 'zig_lang')
+        \\    git                     Inspect Git modules (use -v for full index & file tree breakdown)
+        \\    config                  Inspect active/inactive modules bitmask (use -v for full config dump)
+        \\    prompt                  Inspect isolated module outputs, visible width, and raw ANSI escapes
+        \\    timings, profile        Single-pass per-module and pipeline execution profiler (µs)
+        \\    bench                   Multi-pass statistical benchmark (min, p50, p95, p99, max, throughput)
+        \\    style, colors           Render live ANSI color palette and preview configured module styles
+        \\    env                     Inspect terminal capabilities ($TERM, TrueColor, UTF-8, env vars)
+        \\    shell                   Inspect shell RC hooks and init scripts (use -v to preview script)
         \\
         \\OPTIONS for 'debug':
-        \\    --verbose, -v           Show detailed diagnostic breakdown (index entries, hashes, timing)
+        \\    --verbose, -v           Show detailed diagnostic breakdown (index entries, raw ANSI, scripts)
         \\    --json                  Output diagnostic data in JSON format
+        \\    --iterations, -n <num>  Number of benchmark iterations for 'debug bench' (default: 100)
         \\    --output, -o <path>     Write output directly to specified file
     );
 }

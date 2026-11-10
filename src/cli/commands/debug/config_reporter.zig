@@ -32,18 +32,19 @@ pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugCont
         }
     }
 
-    const active_mask = prompt_engine.computeActiveModulesMask(config.format);
+    const active_mask = prompt_engine.computeActiveModulesMask(config.format) | prompt_engine.computeActiveModulesMask(config.right_format);
     const decls = @typeInfo(registry).@"struct".decls;
 
     if (dctx.json) {
         try writer.print(
-            \\{{ "config_path": {s}{s}{s}, "file_size": {d}, "format": "{s}", "add_newline": {}, "active_modules": [
+            \\{{ "config_path": {s}{s}{s}, "file_size": {d}, "format": "{s}", "right_format": "{s}", "add_newline": {}, "active_modules": [
         , .{
             if (config_path_opt != null) "\"" else "",
             if (config_path_opt) |p| p else "null",
             if (config_path_opt != null) "\"" else "",
             file_size,
             config.format,
+            config.right_format,
             config.add_newline,
         });
 
@@ -111,6 +112,7 @@ pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugCont
             \\Root Settings:
             \\  Add Newline:     {}
             \\  Format:          "{s}"
+            \\  Right Format:    "{s}"
             \\
             \\Active Modules:
             \\
@@ -120,6 +122,7 @@ pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugCont
             file_size,
             config.add_newline,
             config.format,
+            config.right_format,
         });
 
         inline for (decls, 0..) |decl, idx| {

@@ -20,6 +20,8 @@ pub const GitBranchConfig = struct {
     truncation_length: usize = 0,
     // Symbol appended when branch name is truncated.
     truncation_symbol: []const u8 = "…",
+    // Always populate $remote_branch even when it matches the local branch name.
+    always_show_remote: bool = false,
     // Whether the git_branch module is disabled.
     disabled: bool = false,
 };
@@ -90,7 +92,7 @@ pub fn render(
                     up.merge["refs/heads/".len..]
                 else
                     up.merge;
-                if (!std.mem.eql(u8, merge_short, raw_branch)) {
+                if (config.always_show_remote or !std.mem.eql(u8, merge_short, raw_branch)) {
                     remote_branch_str = truncateBranch(
                         &remote_trunc_buf,
                         merge_short,

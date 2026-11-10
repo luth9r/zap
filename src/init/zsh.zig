@@ -44,6 +44,7 @@ pub const SCRIPT =
     \\    else
     \\        PROMPT="$("{{EXE}}" prompt --status "$exit_code" --duration "$duration" --shell zsh)"
     \\    fi
+    \\    RPROMPT="$("{{EXE}}" prompt --right --status "$exit_code" --duration "$duration" --shell zsh)"
     \\}
     \\
     \\autoload -Uz add-zsh-hook

@@ -6,7 +6,7 @@ const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
-pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, ahead_behind };
+pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, ahead_behind, up_to_date };
 
 pub const GitStatusConfig = struct {
     // Format template for the git_status module.
@@ -154,7 +154,7 @@ pub fn formatAheadBehind(
             }
             break :blk std.fmt.bufPrint(buf, "{s}{d}", .{ config.behind, b }) catch "";
         },
-        .up_to_date => "",
+        .up_to_date => config.up_to_date,
     };
 }
 
@@ -177,7 +177,7 @@ pub fn render(
     const info = git_utils.getGitStatusForDir(io, ctx.cwd, git_dir, branch);
 
     // If nothing to report and no status symbols, return early
-    if (!info.hasAnyStatus()) return;
+    if (!info.hasAnyStatus() and config.up_to_date.len == 0) return;
 
     var all_status_buf: [128]u8 = undefined;
     const all_status_str = formatAllStatus(&all_status_buf, config, info);
@@ -191,6 +191,7 @@ pub fn render(
         .vars = &.{
             .{ .name = .all_status, .value = all_status_str },
             .{ .name = .ahead_behind, .value = ahead_behind_str },
+            .{ .name = .up_to_date, .value = if (info.ahead == 0 and info.behind == 0) config.up_to_date else "" },
             .{ .name = .stashed, .value = if (info.stashed) config.stashed else "" },
             .{ .name = .modified, .value = if (info.modified) config.modified else "" },
             .{ .name = .staged, .value = if (info.staged) config.staged else "" },

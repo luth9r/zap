@@ -7,6 +7,8 @@ pub const git_reporter = @import("git_reporter.zig");
 pub const config_reporter = @import("config_reporter.zig");
 pub const env_reporter = @import("env_reporter.zig");
 pub const bench_reporter = @import("bench_reporter.zig");
+pub const prompt_reporter = @import("prompt_reporter.zig");
+pub const style_reporter = @import("style_reporter.zig");
 
 const PromptContext = context.PromptContext;
 const DebugContext = context.DebugContext;
@@ -16,16 +18,21 @@ pub const Args = struct {
     json: bool = false,
     verbose: bool = false,
     output_path: ?[]const u8 = null,
+    iterations: usize = 100,
 };
 
 pub const DebugTarget = enum {
     git,
     config,
-    bench,
+    timings,
     profile,
+    bench,
     prompt,
+    style,
+    colors,
     env,
     shell,
+    modules,
     all,
 };
 
@@ -70,9 +77,13 @@ pub fn execute(init: std.process.Init, args: Args) !void {
                 }
             },
             .config => try config_reporter.printConfigDebug(init, writer, dctx),
-            .bench, .profile, .prompt => try bench_reporter.printPromptProfileDebug(init, writer, dctx),
-            .env, .shell => try env_reporter.printEnvDebug(init, writer, dctx),
-            .all => {
+            .timings, .profile => try bench_reporter.printTimingsDebug(init, writer, dctx),
+            .bench => try bench_reporter.printPromptProfileDebug(init, writer, dctx, args.iterations),
+            .prompt => try prompt_reporter.printPromptInspectorDebug(init, writer, dctx),
+            .style, .colors => try style_reporter.printStyleDebug(init, writer, dctx),
+            .env => try env_reporter.printEnvDebug(init, writer, dctx),
+            .shell => try env_reporter.printShellDebug(init, writer, dctx),
+            .modules, .all => {
                 inline for (@typeInfo(registry).@"struct".decls) |decl| {
                     const mod = @field(registry, decl.name);
                     if (@hasDecl(mod, "debug")) {
@@ -376,4 +387,33 @@ test "integration: zap debug os, character, cmd_duration" {
     try Harness.expectContains(out_dur, "Module: cmd_duration");
     try Harness.expectContains(out_dur, "Duration (ms):");
 }
+
+test "integration: zap debug timings, prompt, shell, and style targets" {
+    var h = try Harness.create(testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+
+    const out_timings = try h.execZap(&.{ "debug", "timings" });
+    try Harness.expectContains(out_timings, "Zap Single-Pass Timing Profiler");
+    try Harness.expectContains(out_timings, "Pipeline Stages:");
+
+    const out_prompt = try h.execZap(&.{ "debug", "prompt", "-v" });
+    try Harness.expectContains(out_prompt, "Zap Prompt Render & AST Inspector");
+    try Harness.expectContains(out_prompt, "Assembled Left Prompt");
+
+    const out_shell = try h.execZap(&.{ "debug", "shell" });
+    try Harness.expectContains(out_shell, "Zap Shell Integration Inspector");
+    try Harness.expectContains(out_shell, "Supported Shells & Hook Status:");
+
+    const out_style = try h.execZap(&.{ "debug", "style" });
+    try Harness.expectContains(out_style, "Zap ANSI Style & Color Palette Inspector");
+    try Harness.expectContains(out_style, "Configured Module Styles:");
+
+    const out_bench_n = try h.execZap(&.{ "debug", "bench", "-n", "10", "--json" });
+    try Harness.expectContains(out_bench_n, "\"iterations\": 10");
+    try Harness.expectContains(out_bench_n, "\"p50_us\":");
+    try Harness.expectContains(out_bench_n, "\"p95_us\":");
+}
+
 

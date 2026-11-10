@@ -16,12 +16,16 @@ zap debug [target] [options]
 
 | Target | Description |
 | :--- | :--- |
-| *(default / `all`)* | Runs a full diagnostic report (configuration, git repository, prompt output). |
-| `config` | Dumps the active configuration, resolved path, format tokens, and custom module fields. |
-| `git` | Inspects git branch, commit hash, repository status, ahead/behind counts, and stash count. |
-| `env` / `shell` | Diagnoses shell detection, TrueColor support, UTF-8 locale, and shell rc integration hooks. |
-| `bench` / `profile` | Runs a 100-iteration benchmark and outputs a microsecond breakdown by phase and module. |
-| `<module_name>` | Inspects a specific module (e.g. `zap debug zig_lang`, `zap debug directory`). |
+| *(default / `all` / `modules`)* | Inspects the diagnostic state of all registered modules. |
+| `<module_name>` | Inspects a single specific module (e.g. `zap debug zig_lang`, `zap debug directory`). |
+| `git` | Inspects Git modules (`git_branch`, `git_commit`, `git_state`, `git_status`). Use `-v` for full index and modified/untracked file lists. |
+| `config` | Dumps the active configuration, resolved path, `format` / `right_format`, and active/inactive module bitmask (use `-v` for all module fields). |
+| `prompt` | Inspects isolated module outputs, byte length, visible character width, and raw escaped ANSI sequences (`\x1b[...]`). |
+| `timings` / `profile` | Runs a single-pass per-module and pipeline execution profiler (µs) without multi-pass stress benchmarking. |
+| `bench` | Runs a multi-pass statistical benchmark (min, p50, p95, p99, mean, max, throughput, and latency histogram). |
+| `style` / `colors` | Renders a live ANSI 16-color palette, text modifiers, and previews every module's configured `style`. |
+| `env` | Diagnoses terminal capabilities (`$TERM`, TrueColor, UTF-8 locale) and key environment variables. |
+| `shell` | Inspects shell RC integration hooks (`bash`, `zsh`, `fish`, `powershell`), supported features, and previews init scripts with `-v`. |
 
 ---
 
@@ -29,9 +33,13 @@ zap debug [target] [options]
 
 - `-v`, `--verbose`: Enables detailed inspection mode:
   - **Git**: Lists exact modified, untracked, deleted, and conflicted files.
+  - **Prompt**: Shows raw escaped ANSI sequences for every active module.
+  - **Style**: Shows compiled ANSI escape sequences next to each module's sample preview.
+  - **Shell**: Prints the generated initialization script for the current shell.
   - **Languages / Tools**: Shows trigger files, matched extensions, and directory scan depth.
-  - **Config**: Dumps detailed struct fields and values.
+  - **Config**: Dumps detailed struct fields and values for every module.
 - `--json`: Outputs diagnostic reports in structured JSON format (ideal for CI and tool integration).
+- `-n <num>`, `--iterations <num>`: Sets the number of benchmark iterations for `zap debug bench` (default: `100`, max: `2000`).
 - `-o <file>`, `--output <file>`: Writes the diagnostic output directly to the specified file.
 
 ---

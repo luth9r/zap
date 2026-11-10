@@ -9,6 +9,7 @@ pub const ZigLangModule = module.GenericLanguageModule(.{
     .files = &.{ "build.zig", "build.zig.zon" },
 });
 
+pub const Var = ZigLangModule.Var;
 pub const Config = ZigLangModule.Config;
 pub const ZigLangConfig = Config;
 pub const render = ZigLangModule.render;

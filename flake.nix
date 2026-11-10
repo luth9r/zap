@@ -42,7 +42,7 @@
 
           testAll = pkgs.writeShellScriptBin "test-all" ''
             echo "󱐋 Running all Zap unit and integration tests..."
-            exec ${pkgs.zig}/bin/zig build test
+            exec ${pkgs.zig}/bin/zig build test --summary all
           '';
         in
         {

@@ -28,6 +28,15 @@ pub const SCRIPT =
     \\    end
     \\end
     \\
+    \\function fish_right_prompt
+    \\    set -l last_status $status
+    \\    set -l duration "$CMD_DURATION"
+    \\    if test -z "$duration"
+    \\        set duration 0
+    \\    end
+    \\    "{{EXE}}" prompt --right --status "$last_status" --duration "$duration" --shell fish
+    \\end
+    \\
 ;
 
 const testing = std.testing;

@@ -23,7 +23,7 @@ pub fn printModuleList(writer: anytype) !void {
     inline for (@typeInfo(registry).@"struct".decls) |decl| {
         const mod = @field(registry, decl.name);
         const name = decl.name;
-        const category = if (std.mem.startsWith(u8, @typeName(mod), "modules.languages.") or std.mem.eql(u8, name, "zig_lang")) "languages" else "core";
+        const category = if (@hasDecl(mod, "Config") and @hasDecl(mod, "Var") and @typeInfo(mod.Var).@"enum".fields.len == 3) "languages" else if (std.mem.startsWith(u8, @typeName(mod), "modules.languages.") or std.mem.eql(u8, name, "zig_lang") or std.mem.eql(u8, name, "python") or std.mem.eql(u8, name, "golang") or std.mem.eql(u8, name, "rust") or std.mem.eql(u8, name, "nodejs") or std.mem.eql(u8, name, "dotnet") or std.mem.eql(u8, name, "java") or std.mem.eql(u8, name, "c") or std.mem.eql(u8, name, "lua") or std.mem.eql(u8, name, "nix") or std.mem.eql(u8, name, "docker")) "languages" else "core";
 
         const cfg = if (module_pkg.resolveConfigType(mod)) |CfgT| CfgT{} else struct {}{};
         const symbol = if (@hasField(@TypeOf(cfg), "symbol")) @field(cfg, "symbol") else "-";
@@ -51,6 +51,16 @@ fn getModuleDescription(comptime name: []const u8) []const u8 {
     if (std.mem.eql(u8, name, "character")) return "Prompt status character";
     if (std.mem.eql(u8, name, "os")) return "Operating system indicator symbol";
     if (std.mem.eql(u8, name, "zig_lang")) return "Zig compiler toolchain and project indicator";
+    if (std.mem.eql(u8, name, "python")) return "Python virtual environment and project indicator";
+    if (std.mem.eql(u8, name, "golang")) return "Go module and workspace indicator";
+    if (std.mem.eql(u8, name, "rust")) return "Rust Cargo project and toolchain indicator";
+    if (std.mem.eql(u8, name, "nodejs")) return "Node.js / TypeScript / Bun project indicator";
+    if (std.mem.eql(u8, name, "dotnet")) return ".NET SDK, C# / F# solution and project indicator";
+    if (std.mem.eql(u8, name, "java")) return "Java / Maven / Gradle / JVM project indicator";
+    if (std.mem.eql(u8, name, "c")) return "C / C++ CMake, Makefile, and Meson project indicator";
+    if (std.mem.eql(u8, name, "lua")) return "Lua script and project configuration indicator";
+    if (std.mem.eql(u8, name, "nix")) return "Nix flake and declarative shell indicator";
+    if (std.mem.eql(u8, name, "docker")) return "Docker and Compose container context indicator";
     return "Prompt module";
 }
 

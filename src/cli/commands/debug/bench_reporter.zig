@@ -39,7 +39,21 @@ fn writeBar(writer: anytype, percent: usize, comptime max_width: usize) !void {
     try writer.writeByte(']');
 }
 
-pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
+pub fn printTimingsDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
+    try runProfilerAndBenchmark(init, writer, dctx, false, 0);
+}
+
+pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: DebugContext, iterations: usize) !void {
+    try runProfilerAndBenchmark(init, writer, dctx, true, iterations);
+}
+
+fn runProfilerAndBenchmark(
+    init: std.process.Init,
+    writer: anytype,
+    dctx: DebugContext,
+    run_bench: bool,
+    requested_iterations: usize,
+) !void {
     const io = dctx.prompt.io orelse return;
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -153,15 +167,108 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
     const single_run_t1 = getTimestampNs();
     const single_run_total_ns = if (single_run_t1 > single_run_t0) single_run_t1 - single_run_t0 else 0;
 
-    // Multi-pass benchmark: 100 iterations
-    const BenchmarkIterations: usize = 100;
+    if (!run_bench) {
+        if (dctx.json) {
+            try writer.print(
+                \\{{ "target": "timings", "total_render_us": {d}, "format_duration_us": {d}, "git_discovery_us": {d}, "buffer_used_bytes": {d}, "buffer_capacity_bytes": {d}, "modules": [
+            , .{
+                @divTrunc(single_run_total_ns, 1000),
+                @divTrunc(fmt_dur_ns, 1000),
+                @divTrunc(git_dur_ns, 1000),
+                rendered_pos,
+                rendered_prompt_buf.len,
+            });
+            for (profiles, 0..) |p, i| {
+                if (i > 0) try writer.writeAll(", ");
+                try writer.print(
+                    \\{{ "name": "{s}", "active": {}, "duration_us": {d}, "bytes": {d} }}
+                , .{
+                    p.name,
+                    p.active,
+                    @divTrunc(p.duration_ns, 1000),
+                    p.bytes,
+                });
+            }
+            try writer.writeAll(" ] }\n");
+        } else {
+            try writer.print(
+                \\⚡ Zap Single-Pass Timing Profiler
+                \\
+                \\Configuration:
+                \\  Add Newline:      {}
+                \\  Buffer Usage:     {d} / {d} bytes ({d}.{d}% utilized)
+                \\
+                \\Per-Module Execution Breakdown (Single Pass):
+                \\
+            , .{
+                config.add_newline,
+                rendered_pos,
+                rendered_prompt_buf.len,
+                (rendered_pos * 100) / rendered_prompt_buf.len,
+                ((rendered_pos * 1000) / rendered_prompt_buf.len) % 10,
+            });
+
+            for (profiles) |p| {
+                if (p.active) {
+                    const mod_us = @divTrunc(p.duration_ns, 1000);
+                    const percent = if (single_run_total_ns > 0) (p.duration_ns * 100) / single_run_total_ns else 0;
+                    try writer.print("  ✔ {s:<15} {d:>6} µs  [{d:>3}%]  ({d:>2} bytes)  ", .{ p.name, mod_us, percent, p.bytes });
+                    try writeBar(writer, percent, 20);
+                    try writer.writeByte('\n');
+                } else {
+                    try writer.print("  · {s:<15}      0 µs  (inactive)\n", .{p.name});
+                }
+            }
+
+            const modules_dur_ns = if (single_run_total_ns > (git_dur_ns + fmt_dur_ns))
+                single_run_total_ns - (git_dur_ns + fmt_dur_ns)
+            else
+                0;
+            const git_pct = if (single_run_total_ns > 0) (git_dur_ns * 100) / single_run_total_ns else 0;
+            const mod_pct = if (single_run_total_ns > 0) (modules_dur_ns * 100) / single_run_total_ns else 0;
+            const fmt_pct = if (single_run_total_ns > 0) (fmt_dur_ns * 100) / single_run_total_ns else 0;
+
+            try writer.print(
+                \\
+                \\Pipeline Stages:
+                \\  Git Resolution:   {d:>6} µs  [{d:>3}%]  
+            , .{ @divTrunc(git_dur_ns, 1000), git_pct });
+            try writeBar(writer, git_pct, 20);
+            try writer.print(
+                \\
+                \\  Render Modules:   {d:>6} µs  [{d:>3}%]  
+            , .{ @divTrunc(modules_dur_ns, 1000), mod_pct });
+            try writeBar(writer, mod_pct, 20);
+            try writer.print(
+                \\
+                \\  Template Format:  {d:>6} µs  [{d:>3}%]  
+            , .{ @divTrunc(fmt_dur_ns, 1000), fmt_pct });
+            try writeBar(writer, fmt_pct, 20);
+
+            try writer.print(
+                \\
+                \\  Total Single-Run: {d:>6} µs ({d}.{d:0>3} ms)
+                \\
+            , .{
+                @divTrunc(single_run_total_ns, 1000),
+                @divTrunc(single_run_total_ns, 1_000_000),
+                @divTrunc(@mod(single_run_total_ns, 1_000_000), 1000),
+            });
+        }
+        return;
+    }
+
+    // Multi-pass benchmark (default 100 iterations, capped at 2000 on stack)
+    const MaxStackIters: usize = 2000;
+    const bench_iters: usize = if (requested_iterations == 0) 100 else @min(requested_iterations, MaxStackIters);
     var min_ns: u64 = std.math.maxInt(u64);
     var max_ns: u64 = 0;
     var total_ns: u64 = 0;
 
-    var iter_durations: [BenchmarkIterations]u64 = undefined;
+    var iter_durations_buf: [MaxStackIters]u64 = undefined;
+    const iter_durations = iter_durations_buf[0..bench_iters];
     var bench_iter: usize = 0;
-    while (bench_iter < BenchmarkIterations) : (bench_iter += 1) {
+    while (bench_iter < bench_iters) : (bench_iter += 1) {
         var dummy_buf: [4096]u8 = undefined;
         var dummy_pos: usize = 0;
         const dummy_writer = BufferWriter.init(&dummy_buf, &dummy_pos);
@@ -177,8 +284,13 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
         total_ns += b_dur;
     }
 
+    std.mem.sort(u64, iter_durations, {}, std.sort.asc(u64));
+    const p50_ns = iter_durations[bench_iters / 2];
+    const p95_ns = iter_durations[@min(bench_iters - 1, (bench_iters * 95) / 100)];
+    const p99_ns = iter_durations[@min(bench_iters - 1, (bench_iters * 99) / 100)];
+
     if (min_ns == std.math.maxInt(u64)) min_ns = 0;
-    const mean_ns = if (BenchmarkIterations > 0) total_ns / BenchmarkIterations else 0;
+    const mean_ns = if (bench_iters > 0) total_ns / bench_iters else 0;
     const throughput = if (mean_ns > 0) (1_000_000_000 / mean_ns) else 0;
 
     if (dctx.json) {
@@ -205,11 +317,14 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
         }
 
         try writer.print(
-            \\ ], "benchmark": {{ "iterations": {d}, "min_us": {d}, "mean_us": {d}, "max_us": {d}, "throughput_renders_per_sec": {d} }} }}
+            \\ ], "benchmark": {{ "iterations": {d}, "min_us": {d}, "p50_us": {d}, "p95_us": {d}, "p99_us": {d}, "mean_us": {d}, "max_us": {d}, "throughput_renders_per_sec": {d} }} }}
             \\
         , .{
-            BenchmarkIterations,
+            bench_iters,
             @divTrunc(min_ns, 1000),
+            @divTrunc(p50_ns, 1000),
+            @divTrunc(p95_ns, 1000),
+            @divTrunc(p99_ns, 1000),
             @divTrunc(mean_ns, 1000),
             @divTrunc(max_ns, 1000),
             throughput,
@@ -275,7 +390,10 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
             \\
             \\Multi-Pass Benchmark ({d} iterations):
             \\  Fastest (Min):    {d:>6} µs ({d}.{d:0>3} ms)
+            \\  Median (p50):     {d:>6} µs ({d}.{d:0>3} ms)
             \\  Average (Mean):   {d:>6} µs ({d}.{d:0>3} ms)
+            \\  p95 Latency:      {d:>6} µs ({d}.{d:0>3} ms)
+            \\  p99 Latency:      {d:>6} µs ({d}.{d:0>3} ms)
             \\  Slowest (Max):    {d:>6} µs ({d}.{d:0>3} ms)
             \\  Throughput:       {d} renders/sec
             \\
@@ -283,13 +401,22 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
             @divTrunc(single_run_total_ns, 1000),
             @divTrunc(single_run_total_ns, 1_000_000),
             @divTrunc(@mod(single_run_total_ns, 1_000_000), 1000),
-            BenchmarkIterations,
+            bench_iters,
             @divTrunc(min_ns, 1000),
             @divTrunc(min_ns, 1_000_000),
             @divTrunc(@mod(min_ns, 1_000_000), 1000),
+            @divTrunc(p50_ns, 1000),
+            @divTrunc(p50_ns, 1_000_000),
+            @divTrunc(@mod(p50_ns, 1_000_000), 1000),
             @divTrunc(mean_ns, 1000),
             @divTrunc(mean_ns, 1_000_000),
             @divTrunc(@mod(mean_ns, 1_000_000), 1000),
+            @divTrunc(p95_ns, 1000),
+            @divTrunc(p95_ns, 1_000_000),
+            @divTrunc(@mod(p95_ns, 1_000_000), 1000),
+            @divTrunc(p99_ns, 1000),
+            @divTrunc(p99_ns, 1_000_000),
+            @divTrunc(@mod(p99_ns, 1_000_000), 1000),
             @divTrunc(max_ns, 1000),
             @divTrunc(max_ns, 1_000_000),
             @divTrunc(@mod(max_ns, 1_000_000), 1000),
@@ -305,12 +432,12 @@ pub fn printPromptProfileDebug(init: std.process.Init, writer: anytype, dctx: De
             buckets[b_idx] += 1;
         }
 
-        try writer.writeAll("\nLatency Distribution (100 runs):\n");
+        try writer.print("\nLatency Distribution ({d} runs):\n", .{bench_iters});
         for (0..5) |b| {
             const low_us = @divTrunc(min_ns + b * step, 1000);
             const high_us = @divTrunc(@min(max_ns, min_ns + (b + 1) * step), 1000);
             const count = buckets[b];
-            const pct = (count * 100) / BenchmarkIterations;
+            const pct = (count * 100) / bench_iters;
             try writer.print("  {d:>5} - {d:<5} µs:  [{d:>3} runs]  ", .{ low_us, high_us, count });
             try writeBar(writer, pct, 24);
             try writer.writeByte('\n');

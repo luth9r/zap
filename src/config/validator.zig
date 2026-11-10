@@ -267,6 +267,24 @@ pub fn validateContent(
             val = toml_parser.extractMultilineValue(val, content, &line_it);
         } else {
             val = toml_parser.stripInlineComment(val);
+
+            // Handle TOML inline tables: key = { k1 = "v1", k2 = 123 }
+            if (val.len > 0 and val[0] == '{') {
+                if (val.len < 2 or val[val.len - 1] != '}') {
+                    try writer.print("✖ Error [{s}:{d}]: unclosed inline table '{{' for '{s}'\n", .{
+                        file_display,
+                        line_num,
+                        key,
+                    });
+                    res.error_count += 1;
+                    continue;
+                }
+                const target_sec = if (current_section) |s| s else key;
+                const inner = std.mem.trim(u8, val[1 .. val.len - 1], " \t\r");
+                try validateInlineTable(writer, target_sec, inner, file_display, line_num, &res);
+                continue;
+            }
+
             // Check for unclosed single-line quotes
             if (val.len > 0) {
                 const quote_char = val[0];
@@ -296,6 +314,107 @@ pub fn validateContent(
     return res;
 }
 
+fn validateInlineTable(
+    writer: anytype,
+    target_section: []const u8,
+    content_inside: []const u8,
+    file_display: []const u8,
+    line_num: usize,
+    res: *ValidationResult,
+) !void {
+    var is_registered_section = false;
+    inline for (@typeInfo(registry).@"struct".decls) |decl| {
+        if (std.mem.eql(u8, target_section, decl.name)) {
+            is_registered_section = true;
+        }
+    }
+    if (!is_registered_section) {
+        try writer.print("✖ Error [{s}:{d}]: unknown section '{s}' in inline table\n", .{
+            file_display,
+            line_num,
+            target_section,
+        });
+        res.error_count += 1;
+        return;
+    }
+
+    var pair_start: usize = 0;
+    var i: usize = 0;
+    var in_quotes: ?u8 = null;
+
+    while (i < content_inside.len) : (i += 1) {
+        const c = content_inside[i];
+        if (in_quotes) |q| {
+            if (c == '\\' and i + 1 < content_inside.len) {
+                i += 1;
+                continue;
+            }
+            if (c == q) {
+                in_quotes = null;
+            }
+        } else {
+            if (c == '"' or c == '\'') {
+                in_quotes = c;
+            } else if (c == ',') {
+                try validateInlinePair(writer, target_section, content_inside[pair_start..i], file_display, line_num, res);
+                pair_start = i + 1;
+            }
+        }
+    }
+
+    if (pair_start < content_inside.len) {
+        try validateInlinePair(writer, target_section, content_inside[pair_start..], file_display, line_num, res);
+    }
+}
+
+fn validateInlinePair(
+    writer: anytype,
+    target_section: []const u8,
+    item: []const u8,
+    file_display: []const u8,
+    line_num: usize,
+    res: *ValidationResult,
+) !void {
+    const trimmed_item = std.mem.trim(u8, item, " \t\r");
+    if (trimmed_item.len == 0) return;
+
+    const eq_idx = std.mem.indexOfScalar(u8, trimmed_item, '=') orelse {
+        try writer.print("✖ Error [{s}:{d}]: syntax error in inline table [{s}], expected 'key = value', got '{s}'\n", .{
+            file_display,
+            line_num,
+            target_section,
+            trimmed_item,
+        });
+        res.error_count += 1;
+        return;
+    };
+
+    var k = std.mem.trim(u8, trimmed_item[0..eq_idx], " \t");
+    var v = std.mem.trim(u8, trimmed_item[eq_idx + 1 ..], " \t");
+    if (k.len >= 2 and k[0] == '"' and k[k.len - 1] == '"') {
+        k = k[1 .. k.len - 1];
+    }
+
+    if (v.len > 0) {
+        const q = v[0];
+        if (q == '"' or q == '\'') {
+            if (v.len < 2 or v[v.len - 1] != q) {
+                try writer.print("✖ Error [{s}:{d}]: unclosed quote in inline table [{s}] for '{s}'\n", .{
+                    file_display,
+                    line_num,
+                    target_section,
+                    k,
+                });
+                res.error_count += 1;
+                return;
+            }
+            v = v[1 .. v.len - 1];
+        }
+    }
+
+    try validateSectionProperty(writer, target_section, k, v, file_display, line_num, res);
+}
+
 fn validateRootProperty(
     writer: anytype,
     key: []const u8,
@@ -318,13 +437,13 @@ fn validateRootProperty(
         return;
     }
 
-    if (std.mem.eql(u8, key, "format")) {
+    if (std.mem.eql(u8, key, "format") or std.mem.eql(u8, key, "right_format")) {
         try validateFormatString(
             writer,
             val,
             file_display,
             line_num,
-            "root format",
+            if (std.mem.eql(u8, key, "right_format")) "right_format" else "root format",
             &root_allowed_modules,
             res,
         );
@@ -572,5 +691,30 @@ test "unit: validateContent catches invalid style and format errors" {
     // $unknown_module, invalidcolor, unclosed bracket/paren
     try std.testing.expect(res.error_count >= 3);
 }
+
+test "unit: validateContent validates inline tables and right_format" {
+    var out_buf: [4096]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&out_buf, &pos);
+
+    const valid_inline =
+        \\format = "$directory$character" # main prompt
+        \\right_format = "$cmd_duration" # right prompt
+        \\directory = { style = "bold cyan", truncation_length = 3 }
+    ;
+    const res_ok = try validateContent(writer, valid_inline, "inline_ok.toml");
+    try std.testing.expect(res_ok.isValid());
+    try std.testing.expectEqual(@as(usize, 0), res_ok.error_count);
+
+    pos = 0;
+    const invalid_inline =
+        \\right_format = "$nonexistent_mod"
+        \\directory = { style = "bold notacolor", bad_prop = 42 }
+    ;
+    const res_err = try validateContent(writer, invalid_inline, "inline_err.toml");
+    try std.testing.expect(!res_err.isValid());
+    try std.testing.expectEqual(@as(usize, 3), res_err.error_count);
+}
+
 
 

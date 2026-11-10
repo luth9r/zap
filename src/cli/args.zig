@@ -45,6 +45,7 @@ const PromptFlag = enum {
     shell,
     config,
     no_newline,
+    right,
 
     pub fn parse(flag: []const u8) ?PromptFlag {
         if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) return .help;
@@ -54,6 +55,7 @@ const PromptFlag = enum {
         if (std.mem.eql(u8, flag, "--shell") or std.mem.eql(u8, flag, "-sh")) return .shell;
         if (std.mem.eql(u8, flag, "--config") or std.mem.eql(u8, flag, "-c")) return .config;
         if (std.mem.eql(u8, flag, "--no-newline")) return .no_newline;
+        if (std.mem.eql(u8, flag, "--right") or std.mem.eql(u8, flag, "-r")) return .right;
         return null;
     }
 };
@@ -137,6 +139,7 @@ fn parseDebugArgs(args: anytype) !Command {
     var json_flag = false;
     var verbose_flag = false;
     var output_path: ?[]const u8 = null;
+    var iterations: usize = 100;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--json")) {
@@ -145,6 +148,12 @@ fn parseDebugArgs(args: anytype) !Command {
             verbose_flag = true;
         } else if (std.mem.eql(u8, arg, "--output") or std.mem.eql(u8, arg, "-o")) {
             output_path = args.next();
+        } else if (std.mem.eql(u8, arg, "--iterations") or std.mem.eql(u8, arg, "-n")) {
+            if (args.next()) |val| {
+                iterations = std.fmt.parseInt(usize, val, 10) catch 100;
+                if (iterations == 0) iterations = 1;
+                if (iterations > 10000) iterations = 10000;
+            }
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             module_name = arg;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -157,6 +166,7 @@ fn parseDebugArgs(args: anytype) !Command {
         .json = json_flag,
         .verbose = verbose_flag,
         .output_path = output_path,
+        .iterations = iterations,
     } };
 }
 
@@ -203,6 +213,9 @@ fn parsePromptArgs(
                 },
                 .no_newline => {
                     res.prompt.no_newline = true;
+                },
+                .right => {
+                    res.prompt.right = true;
                 },
             }
         } else if (!std.mem.startsWith(u8, arg, "-")) {
