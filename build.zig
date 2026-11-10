@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
+    run_exe_tests.setCwd(b.path("."));
     run_exe_tests.step.dependOn(b.getInstallStep());
     test_step.dependOn(&run_exe_tests.step);
 }

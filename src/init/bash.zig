@@ -8,6 +8,7 @@ pub const SCRIPT =
     \\
     \\_zap_start_time=""
     \\_zap_preexec_ready="true"
+    \\_zap_first_prompt="1"
     \\
     \\_zap_preexec() {
     \\    if [ "$_zap_preexec_ready" = "true" ]; then
@@ -48,7 +49,12 @@ pub const SCRIPT =
     \\    fi
     \\    _zap_preexec_ready="true"
     \\
-    \\    PS1="$("{{EXE}}" prompt --status "$exit_code" --duration "${duration:-0}" --shell bash)"
+    \\    if [ "$_zap_first_prompt" = "1" ]; then
+    \\        _zap_first_prompt="0"
+    \\        PS1="$("{{EXE}}" prompt --status "$exit_code" --duration "${duration:-0}" --shell bash --no-newline)"
+    \\    else
+    \\        PS1="$("{{EXE}}" prompt --status "$exit_code" --duration "${duration:-0}" --shell bash)"
+    \\    fi
     \\}
     \\
     \\if [[ ! "$PROMPT_COMMAND" =~ _zap_prompt_command ]]; then

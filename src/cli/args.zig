@@ -44,6 +44,7 @@ const PromptFlag = enum {
     duration,
     shell,
     config,
+    no_newline,
 
     pub fn parse(flag: []const u8) ?PromptFlag {
         if (std.mem.eql(u8, flag, "--help") or std.mem.eql(u8, flag, "-h")) return .help;
@@ -52,6 +53,7 @@ const PromptFlag = enum {
         if (std.mem.eql(u8, flag, "--duration") or std.mem.eql(u8, flag, "-d") or std.mem.eql(u8, flag, "--cmd-duration")) return .duration;
         if (std.mem.eql(u8, flag, "--shell") or std.mem.eql(u8, flag, "-sh")) return .shell;
         if (std.mem.eql(u8, flag, "--config") or std.mem.eql(u8, flag, "-c")) return .config;
+        if (std.mem.eql(u8, flag, "--no-newline")) return .no_newline;
         return null;
     }
 };
@@ -198,6 +200,9 @@ fn parsePromptArgs(
                     if (args.next()) |val| {
                         res.prompt.config_path = val;
                     }
+                },
+                .no_newline => {
+                    res.prompt.no_newline = true;
                 },
             }
         } else if (!std.mem.startsWith(u8, arg, "-")) {

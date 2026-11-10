@@ -6,6 +6,7 @@ pub const SCRIPT =
     \\# Zap prompt integration for PowerShell
     \\
     \\$global:_zap_start_time = $null
+    \\$global:_zap_first_prompt = $true
     \\
     \\function global:prompt {
     \\    $lastExitCodeForPrompt = if ($global:LASTEXITCODE -ne $null) { $global:LASTEXITCODE } else { 0 }
@@ -17,7 +18,12 @@ pub const SCRIPT =
     \\    }
     \\
     \\    $env:PWD = "$PWD"
-    \\    $out = & "{{EXE}}" prompt --status $lastExitCodeForPrompt --duration $duration --shell powershell
+    \\    if ($global:_zap_first_prompt) {
+    \\        $global:_zap_first_prompt = $false
+    \\        $out = & "{{EXE}}" prompt --status $lastExitCodeForPrompt --duration $duration --shell powershell --no-newline
+    \\    } else {
+    \\        $out = & "{{EXE}}" prompt --status $lastExitCodeForPrompt --duration $duration --shell powershell
+    \\    }
     \\    if ($out -is [array]) {
     \\        $out -join "`n"
     \\    } else {

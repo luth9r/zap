@@ -6,13 +6,26 @@ pub const HOOK_TEMPLATE = "{s} init fish | source";
 pub const SCRIPT =
     \\# Zap prompt integration for Fish
     \\
+    \\set -g __zap_first_prompt 1
+    \\
+    \\function __zap_postexec --on-event fish_postexec
+    \\    if string match -qr '^(clear|cls|reset)(\s|$)' -- "$argv[1]"
+    \\        set -g __zap_first_prompt 1
+    \\    end
+    \\end
+    \\
     \\function fish_prompt
     \\    set -l last_status $status
     \\    set -l duration "$CMD_DURATION"
     \\    if test -z "$duration"
     \\        set duration 0
     \\    end
-    \\    "{{EXE}}" prompt --status "$last_status" --duration "$duration" --shell fish
+    \\    if test "$__zap_first_prompt" = "1"
+    \\        set -g __zap_first_prompt 0
+    \\        "{{EXE}}" prompt --status "$last_status" --duration "$duration" --shell fish --no-newline
+    \\    else
+    \\        "{{EXE}}" prompt --status "$last_status" --duration "$duration" --shell fish
+    \\    end
     \\end
     \\
 ;

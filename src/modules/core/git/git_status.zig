@@ -113,6 +113,20 @@ fn formatCountTemplate(
     return buf[0..pos];
 }
 
+pub const AheadBehindState = union(enum) {
+    diverged: struct { ahead: usize, behind: usize },
+    ahead: usize,
+    behind: usize,
+    up_to_date,
+
+    pub fn classify(ahead: usize, behind: usize) AheadBehindState {
+        if (ahead > 0 and behind > 0) return .{ .diverged = .{ .ahead = ahead, .behind = behind } };
+        if (ahead > 0) return .{ .ahead = ahead };
+        if (behind > 0) return .{ .behind = behind };
+        return .up_to_date;
+    }
+};
+
 /// Formats ahead/behind count string into a buffer.
 pub fn formatAheadBehind(
     buf: []u8,
@@ -120,23 +134,28 @@ pub fn formatAheadBehind(
     ahead: usize,
     behind: usize,
 ) []const u8 {
-    if (ahead > 0 and behind > 0) {
-        if (std.mem.indexOf(u8, config.diverged, "$ahead") != null or std.mem.indexOf(u8, config.diverged, "$behind") != null) {
-            return formatCountTemplate(buf, config.diverged, ahead, behind);
-        }
-        return std.fmt.bufPrint(buf, "{s}{d} {d}", .{ config.diverged, ahead, behind }) catch "";
-    } else if (ahead > 0) {
-        if (std.mem.indexOf(u8, config.ahead, "$count") != null or std.mem.indexOf(u8, config.ahead, "$ahead") != null) {
-            return formatCountTemplate(buf, config.ahead, ahead, 0);
-        }
-        return std.fmt.bufPrint(buf, "{s}{d}", .{ config.ahead, ahead }) catch "";
-    } else if (behind > 0) {
-        if (std.mem.indexOf(u8, config.behind, "$count") != null or std.mem.indexOf(u8, config.behind, "$behind") != null) {
-            return formatCountTemplate(buf, config.behind, 0, behind);
-        }
-        return std.fmt.bufPrint(buf, "{s}{d}", .{ config.behind, behind }) catch "";
-    }
-    return "";
+    const state = AheadBehindState.classify(ahead, behind);
+    return switch (state) {
+        .diverged => |d| blk: {
+            if (std.mem.indexOf(u8, config.diverged, "$ahead") != null or std.mem.indexOf(u8, config.diverged, "$behind") != null) {
+                break :blk formatCountTemplate(buf, config.diverged, d.ahead, d.behind);
+            }
+            break :blk std.fmt.bufPrint(buf, "{s}{d} {d}", .{ config.diverged, d.ahead, d.behind }) catch "";
+        },
+        .ahead => |a| blk: {
+            if (std.mem.indexOf(u8, config.ahead, "$count") != null or std.mem.indexOf(u8, config.ahead, "$ahead") != null) {
+                break :blk formatCountTemplate(buf, config.ahead, a, 0);
+            }
+            break :blk std.fmt.bufPrint(buf, "{s}{d}", .{ config.ahead, a }) catch "";
+        },
+        .behind => |b| blk: {
+            if (std.mem.indexOf(u8, config.behind, "$count") != null or std.mem.indexOf(u8, config.behind, "$behind") != null) {
+                break :blk formatCountTemplate(buf, config.behind, 0, b);
+            }
+            break :blk std.fmt.bufPrint(buf, "{s}{d}", .{ config.behind, b }) catch "";
+        },
+        .up_to_date => "",
+    };
 }
 
 pub const is_git_dependent: bool = true;

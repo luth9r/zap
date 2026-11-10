@@ -7,9 +7,13 @@ pub const SCRIPT =
     \\# Zap prompt integration for Zsh
     \\
     \\_zap_start_time=""
+    \\_zap_first_prompt="1"
     \\
     \\_zap_preexec() {
     \\    _zap_start_time="${EPOCHREALTIME:-$EPOCHSECONDS}"
+    \\    if [[ "$1" == "clear" || "$1" == "cls" || "$1" == "reset" ]]; then
+    \\        _zap_first_prompt="1"
+    \\    fi
     \\}
     \\
     \\_zap_precmd() {
@@ -34,7 +38,12 @@ pub const SCRIPT =
     \\        _zap_start_time=""
     \\    fi
     \\
-    \\    PROMPT="$("{{EXE}}" prompt --status "$exit_code" --duration "$duration" --shell zsh)"
+    \\    if [[ "$_zap_first_prompt" == "1" ]]; then
+    \\        _zap_first_prompt="0"
+    \\        PROMPT="$("{{EXE}}" prompt --status "$exit_code" --duration "$duration" --shell zsh --no-newline)"
+    \\    else
+    \\        PROMPT="$("{{EXE}}" prompt --status "$exit_code" --duration "$duration" --shell zsh)"
+    \\    fi
     \\}
     \\
     \\autoload -Uz add-zsh-hook

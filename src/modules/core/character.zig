@@ -3,6 +3,7 @@ const formatter = @import("../../engine/formatter.zig");
 const BufferWriter = @import("../../utils/buffer_writer.zig").BufferWriter;
 
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../engine/context.zig").DebugContext;
 
 pub const Var = enum { symbol };
 
@@ -44,6 +45,24 @@ pub fn render(
             .{ .name = .symbol, .value = rendered_symbol },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const is_error = dctx.prompt.status_code != 0;
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "character", "status_code": {d}, "is_error": {} }}
+            \\
+        , .{ dctx.prompt.status_code, is_error });
+    } else {
+        try writer.print(
+            \\⚡ Module: character
+            \\  Status Code: {d}
+            \\  Is Error:    {}
+            \\
+        , .{ dctx.prompt.status_code, is_error });
+    }
 }
 
 pub const Harness = @import("../../tests/harness.zig").Harness;

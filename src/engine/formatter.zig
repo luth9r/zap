@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 const style_mod = @import("style.zig");
+const parse_utils = @import("../utils/parse_utils.zig");
+const extractVarName = parse_utils.extractVarName;
 
 pub fn Variable(comptime EnumType: type) type {
     return struct {
@@ -253,13 +255,23 @@ pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !
 
 fn isGroupContentEmpty(raw: []const u8, ctx: anytype) bool {
     var i: usize = 0;
+    var has_var = false;
+    var has_non_empty_var = false;
+    var has_literal = false;
+
     while (i < raw.len) {
         if (raw[i] == '\\' and i + 1 < raw.len) {
-            return false;
+            has_literal = true;
+            i += 2;
+            continue;
         }
         if (raw[i] == '(') {
             if (parseConditionalGroup(raw, i)) |cond| {
-                if (!isGroupContentEmpty(cond.inner, ctx)) return false;
+                if (shouldRenderConditionalGroup(cond.inner, ctx) and !isGroupContentEmpty(cond.inner, ctx)) {
+                    has_non_empty_var = true;
+                } else {
+                    has_var = true;
+                }
                 i = cond.next_index;
                 continue;
             }
@@ -267,16 +279,22 @@ fn isGroupContentEmpty(raw: []const u8, ctx: anytype) bool {
         if (raw[i] == '$') {
             const var_name = extractVarName(raw[i + 1 ..]);
             if (var_name.len > 0) {
+                has_var = true;
                 if (ctx.get(var_name)) |val| {
-                    if (val.len > 0) return false;
+                    if (val.len > 0) has_non_empty_var = true;
                 }
                 i += 1 + var_name.len;
                 continue;
             }
         }
-        return false;
+        has_literal = true;
+        i += 1;
     }
-    return true;
+
+    if (has_var) {
+        return !has_non_empty_var;
+    }
+    return !has_literal;
 }
 
 fn renderGroupContent(
@@ -327,6 +345,16 @@ fn shouldRenderConditionalGroup(inner: []const u8, ctx: anytype) bool {
         if (inner[i] == '\\' and i + 1 < inner.len) {
             i += 2;
             continue;
+        }
+        if (inner[i] == '[') {
+            if (parseStyledGroup(inner, i)) |group| {
+                has_var = true;
+                if (!isGroupContentEmpty(group.content, ctx)) {
+                    all_vars_empty = false;
+                }
+                i = group.next_index;
+                continue;
+            }
         }
         if (inner[i] == '$') {
             const var_name = extractVarName(inner[i + 1 ..]);
@@ -394,17 +422,6 @@ fn parseConditionalGroup(raw: []const u8, start_idx: usize) ?ConditionalGroup {
     return null;
 }
 
-fn extractVarName(slice: []const u8) []const u8 {
-    var len: usize = 0;
-    while (len < slice.len) : (len += 1) {
-        const c = slice[len];
-        if (std.ascii.isAlphanumeric(c) or c == '_') {
-            continue;
-        }
-        break;
-    }
-    return slice[0..len];
-}
 
 const TestVar = enum { user, host, price, symbol, duration, path, missing, text, version };
 test "unit: plain text template" {
@@ -612,6 +629,31 @@ test "unit: multi-byte UTF-8 and emojis in styled template" {
     const res = try formatTemplate(a, "[$symbol$text](bold red) ", ctx);
     defer a.free(res);
     try testing.expectEqualStrings("\x1b[1;31m🦀 master ⚡\x1b[0m ", res);
+}
+
+test "unit: conditional group wrapping styled block with $style skips when content vars are empty" {
+    const a = testing.allocator;
+    const ctx_empty = FormatContext(TestVar){
+        .style = "bold red",
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .missing, .value = "" },
+        },
+    };
+
+    const res_empty = try formatTemplate(a, "([\\[$missing\\]]($style) )", ctx_empty);
+    defer a.free(res_empty);
+    try testing.expectEqualStrings("", res_empty);
+
+    const ctx_non_empty = FormatContext(TestVar){
+        .style = "bold red",
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .text, .value = "!+" },
+        },
+    };
+
+    const res_non_empty = try formatTemplate(a, "([\\[$text\\]]($style) )", ctx_non_empty);
+    defer a.free(res_non_empty);
+    try testing.expectEqualStrings("\x1b[1;31m[!+]\x1b[0m ", res_non_empty);
 }
 
 

@@ -26,7 +26,7 @@ pub const GitBranchConfig = struct {
 
 pub const Config = GitBranchConfig;
 
-/// Truncates a branch name if its length exceeds truncation_length.
+/// Truncates a branch name by Unicode codepoint count (UTF-8 safe) if it exceeds max_len.
 pub fn truncateBranch(
     buf: []u8,
     branch: []const u8,
@@ -36,7 +36,21 @@ pub fn truncateBranch(
     if (max_len == 0 or branch.len <= max_len) {
         return branch;
     }
-    return std.fmt.bufPrint(buf, "{s}{s}", .{ branch[0..max_len], trunc_sym }) catch branch;
+
+    var byte_idx: usize = 0;
+    var char_count: usize = 0;
+    while (byte_idx < branch.len) {
+        if (char_count == max_len) break;
+        const cp_len = std.unicode.utf8ByteSequenceLength(branch[byte_idx]) catch 1;
+        if (byte_idx + cp_len > branch.len) break;
+        byte_idx += cp_len;
+        char_count += 1;
+    }
+
+    if (byte_idx >= branch.len) {
+        return branch;
+    }
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ branch[0..byte_idx], trunc_sym }) catch branch;
 }
 
 /// Renders the git_branch module according to configuration.
@@ -62,13 +76,39 @@ pub fn render(
         config.truncation_symbol,
     );
 
+    // Resolve upstream remote branch name if configured and different from local branch
+    var config_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var git_cfg_buf: [4096]u8 = undefined;
+    var remote_trunc_buf: [256]u8 = undefined;
+    var remote_branch_str: []const u8 = "";
+
+    if (std.fmt.bufPrint(&config_path_buf, "{s}/config", .{git_dir}) catch null) |cfg_path| {
+        if (git_utils.readSmallFile(io, cfg_path, &git_cfg_buf)) |cfg_content| {
+            const up = git_utils.git.ahead_behind.parseUpstreamFromConfig(cfg_content, raw_branch);
+            if (up.merge.len > 0) {
+                const merge_short = if (std.mem.startsWith(u8, up.merge, "refs/heads/"))
+                    up.merge["refs/heads/".len..]
+                else
+                    up.merge;
+                if (!std.mem.eql(u8, merge_short, raw_branch)) {
+                    remote_branch_str = truncateBranch(
+                        &remote_trunc_buf,
+                        merge_short,
+                        config.truncation_length,
+                        config.truncation_symbol,
+                    );
+                }
+            }
+        }
+    }
+
     try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
         .vars = &.{
             .{ .name = .symbol, .value = config.symbol },
             .{ .name = .branch, .value = branch_str },
-            .{ .name = .remote_branch, .value = "" },
+            .{ .name = .remote_branch, .value = remote_branch_str },
         },
     });
 }
@@ -111,6 +151,9 @@ test "unit: truncateBranch below and above max_len" {
 
     // Above limit
     try std.testing.expectEqualStrings("feat…", truncateBranch(&buf, "feature/auth", 4, "…"));
+
+    // Multi-byte UTF-8 safe truncation (4 Cyrillic codepoints = 8 bytes)
+    try std.testing.expectEqualStrings("ветк…", truncateBranch(&buf, "ветка-фичи", 4, "…"));
 }
 
 test "integration: git_branch shows current branch in repo" {

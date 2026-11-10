@@ -2,6 +2,7 @@ const std = @import("std");
 const formatter = @import("../../engine/formatter.zig");
 
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../engine/context.zig").DebugContext;
 
 pub const Var = enum { duration };
 
@@ -85,6 +86,25 @@ pub fn render(
             .{ .name = .duration, .value = dur_str },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    var buf: [64]u8 = undefined;
+    const dur_str = formatDurationBuf(&buf, dctx.prompt.cmd_duration, false) orelse "0ms";
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "cmd_duration", "duration_ms": {d}, "formatted": "{s}" }}
+            \\
+        , .{ dctx.prompt.cmd_duration, dur_str });
+    } else {
+        try writer.print(
+            \\⚡ Module: cmd_duration
+            \\  Duration (ms): {d}
+            \\  Formatted:     {s}
+            \\
+        , .{ dctx.prompt.cmd_duration, dur_str });
+    }
 }
 
 test "unit: formatDurationBuf various ranges" {

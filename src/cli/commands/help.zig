@@ -37,20 +37,6 @@ pub fn printHelp(writer: anytype) !void {
         \\    --verbose, -v           Show detailed diagnostic breakdown (index entries, hashes, timing)
         \\    --json                  Output diagnostic data in JSON format
         \\    --output, -o <path>     Write output directly to specified file
-        \\
-        \\EXAMPLES:
-        \\    zap prompt --status 0 --duration 1500 --shell bash
-        \\    zap init zsh
-        \\    zap init bash --install
-        \\    zap validate
-        \\    zap validate ~/.config/zap/zap.toml
-        \\    zap debug git
-        \\    zap debug git --json -o report.json
-        \\    zap debug config
-        \\    zap debug env
-        \\    zap debug bench
-        \\    zap debug bench --json
-        \\
     );
 }
 

@@ -34,8 +34,34 @@ fn parseSectionHeader(line: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Strips an unquoted trailing inline comment (`# ...`) from a single-line TOML value.
+pub fn stripInlineComment(val: []const u8) []const u8 {
+    var in_quote: ?u8 = null;
+    var i: usize = 0;
+    while (i < val.len) : (i += 1) {
+        const c = val[i];
+        if (in_quote) |q| {
+            if (c == '\\' and q == '"' and i + 1 < val.len) {
+                i += 1;
+                continue;
+            }
+            if (c == q) {
+                in_quote = null;
+            }
+        } else {
+            if (c == '"' or c == '\'') {
+                in_quote = c;
+            } else if (c == '#') {
+                return std.mem.trimEnd(u8, val[0..i], " \t\r");
+            }
+        }
+    }
+    return val;
+}
+
 /// Unquotes simple double- or single-quoted string values.
-fn unquoteValue(val: []const u8) []const u8 {
+fn unquoteValue(raw_val: []const u8) []const u8 {
+    const val = stripInlineComment(raw_val);
     if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
         return val[1 .. val.len - 1];
     }
@@ -531,5 +557,21 @@ test "unit: parse inline table with commas inside quoted strings" {
     try std.testing.expectEqualStrings("[$path](bold, green)", cfg.directory.format);
     try std.testing.expectEqualStrings("H,O,M,E", cfg.directory.home_symbol);
     try std.testing.expectEqualStrings("cyan", cfg.directory.style);
+}
+
+test "unit: parse inline comments after values while preserving hashes in quotes" {
+    const toml_text =
+        \\add_newline = false # disable newline
+        \\[directory]
+        \\truncation_length = 5 # keep 5 segments
+        \\style = "#89b4fa bold" # hex color with inline comment
+    ;
+
+    var cfg: config_mod.Config = config_mod.defaultConfig();
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqual(false, cfg.add_newline);
+    try std.testing.expectEqual(@as(usize, 5), cfg.directory.truncation_length);
+    try std.testing.expectEqualStrings("#89b4fa bold", cfg.directory.style);
 }
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const config_mod = @import("../../config/config.zig");
 const toml_parser = @import("../../config/toml_parser.zig");
 const prompt = @import("../../engine/prompt.zig");
+const context = @import("../../engine/context.zig");
 const init_mod = @import("../../init/root.zig");
 const BufferWriter = @import("../../utils/buffer_writer.zig").BufferWriter;
 
@@ -10,6 +11,7 @@ pub const Args = struct {
     cmd_duration: u64 = 0,
     shell: init_mod.Shell = .generic,
     config_path: ?[]const u8 = null,
+    no_newline: bool = false,
 };
 
 pub fn execute(init: std.process.Init, prompt_args: Args) !void {
@@ -36,6 +38,10 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
         toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
     }
 
+    if (prompt_args.no_newline) {
+        config.add_newline = false;
+    }
+
     const home_path = resolveHomePath(init);
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cwd_path = resolveCwdPath(init, &cwd_buf);
@@ -56,22 +62,8 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
     try std.Io.File.stdout().writeStreamingAll(init.io, prompt_buf[0..pos]);
 }
 
-pub fn resolveHomePath(init: std.process.Init) []const u8 {
-    return init.environ_map.get("HOME") orelse init.environ_map.get("USERPROFILE") orelse ".";
-}
-
-pub fn resolveCwdPath(init: std.process.Init, buf: *[std.fs.max_path_bytes]u8) []const u8 {
-    if (init.environ_map.get("PWD")) |pwd| {
-        return pwd;
-    }
-
-    const cwd: std.Io.Dir = .cwd();
-    const pwd_file = cwd.openFile(init.io, ".", .{}) catch return ".";
-    defer pwd_file.close(init.io);
-
-    const len = pwd_file.realPath(init.io, buf) catch return ".";
-    return buf[0..len];
-}
+pub const resolveHomePath = context.resolveHomePath;
+pub const resolveCwdPath = context.resolveCwdPath;
 
 const testing = std.testing;
 const Harness = @import("../../tests/harness.zig").Harness;
@@ -96,6 +88,17 @@ test "integration: zap prompt CLI flags support" {
     // Test --status 0
     const res_ok = try h.execZap(&.{ "prompt", "--status", "0", "--config", "custom.toml" });
     try Harness.expectContains(res_ok, "OK");
+
+    // Test --no-newline overrides add_newline = true
+    try h.writeFile("newline.toml",
+        \\format = "$character"
+        \\add_newline = true
+        \\
+        \\[character]
+        \\success_symbol = "OK"
+    );
+    const res_no_nl = try h.execZap(&.{ "prompt", "--no-newline", "--config", "newline.toml" });
+    try testing.expect(res_no_nl.len > 0 and res_no_nl[0] != '\n');
 }
 
 test "integration: zap prompt respects CMD_DURATION environment variable" {

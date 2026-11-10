@@ -188,7 +188,17 @@ pub fn getGitCommit(
                     .is_detached = false,
                 };
             }
-        } else |_| {}
+        } else |_| {
+            const ahead_behind = @import("ahead_behind.zig");
+            if (ahead_behind.resolveRefSha(io, git_dir, branch_ref, ref_content_buf[0..64])) |sha| {
+                const tag = findTagForHash(io, git_dir, sha, ref_content_buf[64..192]) orelse "";
+                return GitCommitResult{
+                    .hash = sha,
+                    .tag = tag,
+                    .is_detached = false,
+                };
+            }
+        }
 
         return GitCommitResult{
             .hash = "",

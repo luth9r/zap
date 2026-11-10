@@ -3,6 +3,8 @@ const registry = @import("../modules/registry.zig");
 const module_pkg = @import("../modules/module.zig");
 const style_mod = @import("../engine/style.zig");
 const toml_parser = @import("toml_parser.zig");
+const parse_utils = @import("../utils/parse_utils.zig");
+const extractVarName = parse_utils.extractVarName;
 
 pub const ValidationResult = struct {
     error_count: usize = 0,
@@ -170,17 +172,6 @@ fn findMatchingParen(str: []const u8, start_idx: usize) ?usize {
     return null;
 }
 
-fn extractVarName(slice: []const u8) []const u8 {
-    var len: usize = 0;
-    while (len < slice.len) : (len += 1) {
-        const c = slice[len];
-        if (std.ascii.isAlphanumeric(c) or c == '_') {
-            continue;
-        }
-        break;
-    }
-    return slice[0..len];
-}
 
 const root_allowed_modules = blk: {
     const decls = @typeInfo(registry).@"struct".decls;
@@ -275,6 +266,7 @@ pub fn validateContent(
         if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
             val = toml_parser.extractMultilineValue(val, content, &line_it);
         } else {
+            val = toml_parser.stripInlineComment(val);
             // Check for unclosed single-line quotes
             if (val.len > 0) {
                 const quote_char = val[0];

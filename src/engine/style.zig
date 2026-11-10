@@ -219,6 +219,44 @@ pub const Style = struct {
         return try allocator.dupe(u8, slice);
     }
 
+    fn writeColorCode(buf: []u8, pos: *usize, color: ColorType, is_bg: bool, has_prev: *bool) ?void {
+        switch (color) {
+            .none => {},
+            .ansi_16 => |code| {
+                if (has_prev.*) {
+                    if (pos.* >= buf.len) return null;
+                    buf[pos.*] = ';';
+                    pos.* += 1;
+                }
+                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d}", .{code}) catch return null;
+                pos.* += formatted.len;
+                has_prev.* = true;
+            },
+            .ansi_256 => |code| {
+                if (has_prev.*) {
+                    if (pos.* >= buf.len) return null;
+                    buf[pos.*] = ';';
+                    pos.* += 1;
+                }
+                const prefix: u8 = if (is_bg) 48 else 38;
+                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d};5;{d}", .{ prefix, code }) catch return null;
+                pos.* += formatted.len;
+                has_prev.* = true;
+            },
+            .rgb => |rgb| {
+                if (has_prev.*) {
+                    if (pos.* >= buf.len) return null;
+                    buf[pos.*] = ';';
+                    pos.* += 1;
+                }
+                const prefix: u8 = if (is_bg) 48 else 38;
+                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d};2;{d};{d};{d}", .{ prefix, rgb.r, rgb.g, rgb.b }) catch return null;
+                pos.* += formatted.len;
+                has_prev.* = true;
+            },
+        }
+    }
+
     pub fn toAnsiBuf(self: Style, buf: []u8) ?[]const u8 {
         if (self.is_none) return buf[0..0];
 
@@ -263,73 +301,8 @@ pub const Style = struct {
             }
         }
 
-        switch (self.fg) {
-            .none => {},
-            .ansi_16 => |code| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "{d}", .{code}) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-            .ansi_256 => |code| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "38;5;{d}", .{code}) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-            .rgb => |rgb| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "38;2;{d};{d};{d}", .{ rgb.r, rgb.g, rgb.b }) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-        }
-
-        switch (self.bg) {
-            .none => {},
-            .ansi_16 => |code| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "{d}", .{code}) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-            .ansi_256 => |code| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "48;5;{d}", .{code}) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-            .rgb => |rgb| {
-                if (has_prev) {
-                    if (pos >= buf.len) return null;
-                    buf[pos] = ';';
-                    pos += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos..], "48;2;{d};{d};{d}", .{ rgb.r, rgb.g, rgb.b }) catch return null;
-                pos += formatted.len;
-                has_prev = true;
-            },
-        }
+        writeColorCode(buf, &pos, self.fg, false, &has_prev) orelse return null;
+        writeColorCode(buf, &pos, self.bg, true, &has_prev) orelse return null;
 
         if (pos >= buf.len) return null;
         buf[pos] = 'm';

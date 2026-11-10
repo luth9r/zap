@@ -6,6 +6,7 @@ const fs = @import("../../utils/fs.zig");
 
 pub const Fixture = @import("../../tests/fixture.zig").Fixture;
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
+pub const DebugContext = @import("../../engine/context.zig").DebugContext;
 pub const Shell = @import("../../init/root.zig").Shell;
 pub const Harness = @import("../../tests/harness.zig").Harness;
 
@@ -150,6 +151,27 @@ pub fn render(
             .{ .name = .style, .value = config.style },
         },
     });
+}
+
+pub fn debug(writer: anytype, dctx: DebugContext) !void {
+    const io = dctx.prompt.io orelse return;
+    const os_type = TargetOs.detectCurrent(io);
+    const os_name = @tagName(os_type);
+    const sym = os_type.defaultSymbol();
+
+    if (dctx.json) {
+        try writer.print(
+            \\{{ "module": "os", "detected_os": "{s}", "symbol": "{s}" }}
+            \\
+        , .{ os_name, sym });
+    } else {
+        try writer.print(
+            \\⚡ Module: os
+            \\  Detected OS: {s}
+            \\  Symbol:      {s}
+            \\
+        , .{ os_name, sym });
+    }
 }
 
 test "unit: fromDistroId resolves common distros" {

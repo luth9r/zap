@@ -83,25 +83,41 @@ zap debug bench
 
 Output:
 ```text
-=== Prompt Rendering Benchmark & Profile ===
-  Benchmark (100 iterations):
-    Min:   12 µs
-    Max:   45 µs
-    Mean:  18 µs
+⚡ Zap Prompt Engine Profiler & Benchmark
 
-  Stage Breakdown:
-    findGitDir:        3 µs  (16.7%)
-    readConfig:        1 µs  ( 5.5%)
-    renderModules:    14 µs  (77.8%)
+Configuration:
+  Add Newline:      true
+  Buffer Usage:     108 / 4096 bytes (2.6% utilized)
 
-  Per-Module Execution Breakdown (Single Pass):
-    ✔ directory          6 µs  [ 42%]  (12 bytes)
-    ✔ git_branch         3 µs  [ 21%]  ( 8 bytes)
-    ✔ git_status         2 µs  [ 14%]  ( 4 bytes)
-    ✔ cmd_duration       1 µs  [  7%]  ( 0 bytes)
-    ✔ character          2 µs  [ 14%]  (19 bytes)
-    · os                 0 µs  (inactive)
-    · zig_lang           0 µs  (inactive)
+Per-Module Execution Breakdown (Single Pass):
+  ✔ directory           27 µs  [  0%]  (15 bytes)  [····················]
+  ✔ git_branch          22 µs  [  0%]  (55 bytes)  [····················]
+  · git_commit           0 µs  (inactive)
+  · git_state            0 µs  (inactive)
+  ✔ git_status        2928 µs  [ 98%]  (15 bytes)  [■■■■■■■■■■■■■■■■■■■·]
+  ✔ cmd_duration         0 µs  [  0%]  ( 0 bytes)  [····················]
+  ✔ character            4 µs  [  0%]  (19 bytes)  [····················]
+  · os                   0 µs  (inactive)
+  · zig_lang             0 µs  (inactive)
+
+Pipeline Stages:
+  Git Resolution:        8 µs  [  0%]  [····················]
+  Render Modules:     2965 µs  [ 99%]  [■■■■■■■■■■■■■■■■■■■·]
+  Template Format:       2 µs  [  0%]  [····················]
+  Total Single-Run:   2975 µs (2.975 ms)
+
+Multi-Pass Benchmark (100 iterations):
+  Fastest (Min):      2285 µs (2.285 ms)
+  Average (Mean):     2705 µs (2.705 ms)
+  Slowest (Max):      4760 µs (4.760 ms)
+  Throughput:       369 renders/sec
+
+Latency Distribution (100 runs):
+   2285 - 2780 µs:   [ 75 runs]  [■■■■■■■■■■■■■■■■■■······]
+   2780 - 3275 µs:   [ 16 runs]  [■■■■····················]
+   3275 - 3770 µs:   [  3 runs]  [■·······················]
+   3770 - 4265 µs:   [  5 runs]  [■·······················]
+   4265 - 4760 µs:   [  1 runs]  [■·······················]
 ```
 
 ---
