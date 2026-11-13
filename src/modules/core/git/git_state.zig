@@ -256,8 +256,7 @@ test "integration: git_state during am" {
     defer h.destroy();
 
     try h.setupGit();
-    const rebase_apply = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-apply", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_apply });
+    _ = try h.makeDir(".git/rebase-apply");
     try h.writeFile(".git/rebase-apply/applying", "");
 
     try h.setConfig(
@@ -274,8 +273,7 @@ test "integration: git_state rebase progress" {
     defer h.destroy();
 
     try h.setupGit();
-    const rebase_merge = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-merge", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_merge });
+    _ = try h.makeDir(".git/rebase-merge");
     try h.writeFile(".git/rebase-merge/msgnum", "2");
     try h.writeFile(".git/rebase-merge/end", "5");
 
@@ -293,8 +291,7 @@ test "integration: git_state rebase-apply progress with next and last" {
     defer h.destroy();
 
     try h.setupGit();
-    const rebase_apply = try std.fmt.allocPrint(h.arena.allocator(), "{s}/.git/rebase-apply", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "mkdir", "-p", rebase_apply });
+    _ = try h.makeDir(".git/rebase-apply");
     try h.writeFile(".git/rebase-apply/next", "3");
     try h.writeFile(".git/rebase-apply/last", "10");
 

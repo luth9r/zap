@@ -129,27 +129,20 @@ test "integration: zap prompt respects CMD_DURATION environment variable" {
         \\show_milliseconds = false
     );
 
+    const platform = @import("../../utils/platform.zig");
     const alloc = h.arena.allocator();
-    const env_home = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
-    const env_xdg = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
-    const env_dur = "CMD_DURATION=3500";
+    var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const xdg_dir = platform.joinPath(&xdg_buf, h.tmp_dir, ".config");
 
-    const argv = [_][]const u8{
-        "env",
-        env_home,
-        env_xdg,
-        env_dur,
-        h.zap_bin,
-        "prompt",
+    const env_vars = [_]platform.EnvEntry{
+        .{ .key = "HOME", .value = h.tmp_dir },
+        .{ .key = "XDG_CONFIG_HOME", .value = xdg_dir },
+        .{ .key = "ZAP_CONFIG", .value = null },
+        .{ .key = "CMD_DURATION", .value = "3500" },
     };
 
-    var child = try std.process.spawn(std.testing.io, .{
-        .argv = &argv,
-        .cwd = .{ .path = h.tmp_dir },
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .stdin = .ignore,
-    });
+    var child = try platform.spawnWithEnv(std.testing.io, alloc, h.tmp_dir, &env_vars, &.{ h.zap_bin, "prompt" });
+    defer platform.setEnvWindows("CMD_DURATION", null);
 
     var stream_buf: [512]u8 = undefined;
     var reader = child.stdout.?.reader(std.testing.io, &stream_buf);

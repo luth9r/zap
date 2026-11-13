@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../utils/platform.zig");
 
 pub const args = @import("args.zig");
 pub const version_cmd = @import("commands/version.zig");
@@ -15,6 +16,8 @@ pub const printHelp = help_cmd.printHelp;
 pub const printModuleList = list_modules_cmd.printModuleList;
 
 pub fn run(init: std.process.Init) !void {
+    platform.enableConsole();
+
     const cmd = parseCommand(init, init.arena.allocator()) catch |err| {
         if (err == error.InvalidArgs) {
             std.process.exit(1);

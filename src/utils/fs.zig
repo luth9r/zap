@@ -1,4 +1,8 @@
 const std = @import("std");
+const platform = @import("platform.zig");
+
+pub const getEnvWindows = platform.getEnvWindows;
+pub const testTempSubdir = platform.testTempSubdir;
 
 /// Checks if a file exists at the given path using fast access check.
 pub fn fileExists(io: std.Io, path: []const u8) bool {

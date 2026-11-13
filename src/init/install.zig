@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const root = @import("root.zig");
+const platform = @import("../utils/platform.zig");
 const Shell = root.Shell;
 
 pub const InstallResult = struct {
@@ -17,7 +18,7 @@ pub fn resolveShellConfigFile(
     buf: *[std.fs.max_path_bytes]u8,
 ) ?[]const u8 {
     _ = io;
-    const sep = if (builtin.os.tag == .windows) "\\" else "/";
+    const sep = platform.sep;
 
     return switch (shell) {
         .bash => std.fmt.bufPrint(buf, "{s}{s}.bashrc", .{ home_dir, sep }) catch null,

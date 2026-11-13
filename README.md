@@ -53,6 +53,12 @@ curl -sSL https://github.com/luth9r/zap/releases/download/v1.0.0/zap-v1.0.0-x86_
 mkdir -p ~/.local/bin && mv zap ~/.local/bin/
 ```
 
+```powershell
+# Windows x86_64 (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/luth9r/zap/releases/download/v1.0.0/zap-v1.0.0-x86_64-windows.zip" -OutFile "zap.zip"
+Expand-Archive -Path "zap.zip" -DestinationPath "$env:LOCALAPPDATA\zap" -Force
+```
+
 ### Nix (Home Manager)
 
 ```nix
@@ -119,7 +125,7 @@ eval "$(zap init bash)"
 
 ## Configuration
 
-zap searches for configuration in `~/.config/zap/config.toml` (or `$ZAP_CONFIG`).
+zap searches for configuration in `$ZAP_CONFIG`, `$XDG_CONFIG_HOME/zap/zap.toml`, `%APPDATA%\zap\zap.toml` (on Windows), or `~/.config/zap/config.toml`.
 
 ```toml
 "$schema" = "https://raw.githubusercontent.com/luth9r/zap/main/zap.schema.json"

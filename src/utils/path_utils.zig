@@ -1,6 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
 const BufferWriter = @import("buffer_writer.zig").BufferWriter;
+const platform = @import("platform.zig");
+
+const isSep = platform.isSep;
+const pathStartsWith = platform.pathStartsWith;
 
 pub fn writePath(
     writer: anytype,
@@ -8,12 +12,12 @@ pub fn writePath(
     home: []const u8,
     home_symbol: []const u8,
 ) !void {
-    if (home.len > 0 and std.mem.startsWith(u8, cwd, home)) {
+    if (home.len > 0 and pathStartsWith(cwd, home)) {
         if (cwd.len == home.len) {
             try writer.writeAll(home_symbol);
             return;
         }
-        if (cwd[home.len] == '/') {
+        if (isSep(cwd[home.len])) {
             try writer.writeAll(home_symbol);
             try writer.writeAll(cwd[home.len..]);
             return;
@@ -45,11 +49,11 @@ pub fn formatPathTruncatedBuf(
 ) ?[]const u8 {
     // 1. Truncate to repo root if provided and cwd is inside repository
     if (repo_root) |root| {
-        if (std.mem.startsWith(u8, cwd, root)) {
+        if (pathStartsWith(cwd, root)) {
             const repo_name = std.fs.path.basename(root);
             if (cwd.len == root.len) {
                 return std.fmt.bufPrint(buf, "{s}", .{repo_name}) catch null;
-            } else if (cwd[root.len] == '/' or cwd[root.len] == '\\') {
+            } else if (isSep(cwd[root.len])) {
                 const rel_path = cwd[root.len + 1 ..];
                 if (truncation_length == 0) {
                     return std.fmt.bufPrint(buf, "{s}/{s}", .{ repo_name, rel_path }) catch null;
@@ -190,4 +194,29 @@ test "unit: formatPathTruncatedBuf with repo root" {
 
     const res = formatPathTruncatedBuf(&buf, cwd, home, "~", 3, "…/", repo_root).?;
     try testing.expectEqualStrings("zap/src/engine", res);
+}
+
+test "unit: replaces Windows HOME prefix with tilde and backslashes" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const home = "C:\\Users\\user";
+    const cwd = "C:\\Users\\user\\projects\\zap";
+
+    const result = formatPathBuf(&buf, cwd, home, "~").?;
+    try testing.expectEqualStrings("~\\projects\\zap", result);
+
+    const exact = formatPathBuf(&buf, home, home, "~").?;
+    try testing.expectEqualStrings("~", exact);
+}
+
+test "unit: formatPathTruncatedBuf handles Windows paths and repo root" {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const home = "C:\\Users\\user";
+    const repo_root = "C:\\Users\\user\\projects\\zap";
+    const cwd = "C:\\Users\\user\\projects\\zap\\src\\engine\\sub";
+
+    const res_trunc = formatPathTruncatedBuf(&buf, cwd, home, "~", 3, "…/", null).?;
+    try testing.expectEqualStrings("~/…/src\\engine\\sub", res_trunc);
+
+    const res_repo = formatPathTruncatedBuf(&buf, cwd, home, "~", 3, "…/", repo_root).?;
+    try testing.expectEqualStrings("…/src\\engine\\sub", res_repo);
 }

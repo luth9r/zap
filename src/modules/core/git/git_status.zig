@@ -561,8 +561,7 @@ test "integration: git_status ignores files listed in .gitignore" {
 
     // Create ignored files/folders and an untracked file
     try h.writeFile("app.log", "some log text");
-    const ign_dir = try std.fmt.allocPrint(h.arena.allocator(), "{s}/ignored_folder", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "mkdir", "-p", ign_dir });
+    _ = try h.makeDir("ignored_folder");
     try h.writeFile("ignored_folder/cache.bin", "cached data");
 
     try h.setConfig(
@@ -1224,8 +1223,7 @@ test "integration: git_status ignores empty and new directories without files" {
     try h.git(&.{ "commit", "-m", "init" });
 
     // Create empty directory structure
-    const empty_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/empty_dir", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "mkdir", "-p", empty_path });
+    _ = try h.makeDir("empty_dir");
 
     try h.setConfig(
         \\format = "$git_status"
@@ -1274,9 +1272,7 @@ test "integration: git_status handles tracked symlinks without false modified st
     try h.writeFile("scripts/build.sh", "echo 'building project with multiple lines of script text here';");
     try h.writeFile("regular.txt", "regular content");
 
-    // Create tracked symlink bin_tool pointing to scripts/build.sh
-    const symlink_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/bin_tool", .{h.tmp_dir});
-    try h.run(&[_][]const u8{ "ln", "-s", "scripts/build.sh", symlink_path });
+    _ = (try h.makeSymlink("scripts/build.sh", "bin_tool")) orelse return;
 
     try h.git(&.{ "add", "." });
     try h.git(&.{ "commit", "-m", "commit with symlink" });

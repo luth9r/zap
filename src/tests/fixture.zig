@@ -7,6 +7,7 @@ const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 const Shell = @import("../init/root.zig").Shell;
 const modules = @import("../modules/registry.zig");
 const prompt = @import("../engine/prompt.zig");
+const platform = @import("../utils/platform.zig");
 
 pub const Fixture = struct {
     /// Renders any specific module into a buffer using given Config, Context, and Shell.
@@ -151,42 +152,23 @@ pub const Fixture = struct {
         var prompt_env_buf: [4096]u8 = undefined;
         const prompt_env = try std.fmt.bufPrint(&prompt_env_buf, "ZAP_PROMPT={s}", .{raw_prompt});
 
-        const argv: []const []const u8 = switch (shell) {
-            .bash => &[_][]const u8{
-                "env",
-                prompt_env,
-                bin,
-                "--noprofile",
-                "--norc",
-                "-c",
-                "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"",
-            },
-            .zsh => &[_][]const u8{
-                "env",
-                prompt_env,
-                bin,
-                "-f",
-                "+Z",
-                "-c",
-                "print -nP \"$ZAP_PROMPT\"",
-            },
-            .fish => &[_][]const u8{
-                "env",
-                prompt_env,
-                bin,
-                "--no-config",
-                "-c",
-                "echo -n \"$ZAP_PROMPT\"",
-            },
-            .powershell => &[_][]const u8{
-                "env",
-                prompt_env,
-                bin,
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Console]::Out.Write($env:ZAP_PROMPT)",
-            },
+        if (builtin.os.tag == .windows) {
+            if (shell != .powershell) return null;
+            platform.setEnvWindows("ZAP_PROMPT", raw_prompt);
+        }
+        defer if (builtin.os.tag == .windows) platform.setEnvWindows("ZAP_PROMPT", null);
+
+        const argv: []const []const u8 = if (builtin.os.tag == .windows) switch (shell) {
+            .bash => &.{ bin, "--noprofile", "--norc", "-c", "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"" },
+            .zsh => &.{ bin, "-f", "+Z", "-c", "print -nP \"$ZAP_PROMPT\"" },
+            .fish => &.{ bin, "--no-config", "-c", "echo -n \"$ZAP_PROMPT\"" },
+            .powershell => &.{ bin, "-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write($env:ZAP_PROMPT)" },
+            .generic => return error.UnsupportedShell,
+        } else switch (shell) {
+            .bash => &.{ "env", prompt_env, bin, "--noprofile", "--norc", "-c", "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"" },
+            .zsh => &.{ "env", prompt_env, bin, "-f", "+Z", "-c", "print -nP \"$ZAP_PROMPT\"" },
+            .fish => &.{ "env", prompt_env, bin, "--no-config", "-c", "echo -n \"$ZAP_PROMPT\"" },
+            .powershell => &.{ "env", prompt_env, bin, "-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write($env:ZAP_PROMPT)" },
             .generic => return error.UnsupportedShell,
         };
 

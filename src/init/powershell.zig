@@ -96,37 +96,57 @@ test "integration: real powershell session with auto-installed zap hook and conf
         try std.fmt.allocPrint(alloc, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{h.tmp_dir});
 
     const cmd = try std.fmt.allocPrint(alloc, ". '{s}'; prompt", .{profile_path});
-
-    const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
-    const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
     const zap_dir = std.fs.path.dirname(h.zap_bin) orelse ".";
-    const path_env = if (builtin.os.tag == .windows)
-        try std.fmt.allocPrint(alloc, "PATH={s};C:\\Windows\\System32;C:\\Windows", .{zap_dir})
-    else
-        try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
-    const pwsh_bin = if (builtin.os.tag == .windows) "powershell.exe" else "pwsh";
 
-    const argv = [_][]const u8{
-        "env",
-        home_env,
-        xdg_env,
-        path_env,
-        pwsh_bin,
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        cmd,
-    };
+    var child = if (builtin.os.tag == .windows) blk: {
+        var orig_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const orig_path = Harness.getEnvWindows("PATH", &orig_path_buf) orelse "";
+        const new_path = try std.fmt.allocPrint(alloc, "{s};{s}", .{ zap_dir, orig_path });
+        const xdg_dir = try std.fmt.allocPrint(alloc, "{s}\\.config", .{h.tmp_dir});
 
-    var child = std.process.spawn(std.testing.io, .{
-        .argv = &argv,
-        .cwd = .{ .path = h.tmp_dir },
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .stdin = .ignore,
-    }) catch |err| switch (err) {
-        error.FileNotFound => return,
-        else => return err,
+        Harness.setEnvWindows("HOME", h.tmp_dir);
+        Harness.setEnvWindows("USERPROFILE", h.tmp_dir);
+        Harness.setEnvWindows("XDG_CONFIG_HOME", xdg_dir);
+        Harness.setEnvWindows("ZAP_CONFIG", null);
+        Harness.setEnvWindows("PATH", new_path);
+
+        break :blk std.process.spawn(std.testing.io, .{
+            .argv = &.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd },
+            .cwd = .{ .path = h.tmp_dir },
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .stdin = .ignore,
+        }) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => return err,
+        };
+    } else blk: {
+        const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
+        const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
+        const path_env = try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
+
+        const argv = [_][]const u8{
+            "env",
+            home_env,
+            xdg_env,
+            path_env,
+            "pwsh",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            cmd,
+        };
+
+        break :blk std.process.spawn(std.testing.io, .{
+            .argv = &argv,
+            .cwd = .{ .path = h.tmp_dir },
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .stdin = .ignore,
+        }) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => return err,
+        };
     };
 
     var stream_buf: [512]u8 = undefined;

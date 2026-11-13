@@ -512,7 +512,11 @@ test "unit: resolveConfigPathBuf falls back to HOME/.config/zap/zap.toml" {
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = resolveConfigPathBuf(&buf, mockEnv).?;
-    try std.testing.expectEqualStrings("/home/user/.config/zap/zap.toml", path);
+    const expected = if (builtin.os.tag == .windows)
+        "/home/user\\.config\\zap\\zap.toml"
+    else
+        "/home/user/.config/zap/zap.toml";
+    try std.testing.expectEqualStrings(expected, path);
 }
 
 test "unit: parse os section" {

@@ -62,7 +62,6 @@ const PromptFlag = enum {
 
 pub fn parseCommand(init: std.process.Init, allocator: std.mem.Allocator) !Command {
     var args = try init.minimal.args.iterateAllocator(allocator);
-    defer args.deinit();
 
     const raw_exe = args.next() orelse "zap";
     const exe_basename = std.fs.path.basename(raw_exe);

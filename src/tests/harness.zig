@@ -1,9 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
-const builtin = @import("builtin");
 const Shell = @import("../init/root.zig").Shell;
 const Fixture = @import("fixture.zig").Fixture;
+const assertions = @import("assertions.zig");
 const git_utils = @import("../utils/git_utils.zig");
+const platform = @import("../utils/platform.zig");
 
 /// Integration test harness for Zap prompt modules.
 ///
@@ -55,54 +56,10 @@ pub const Harness = struct {
     status_code: u8,
     cmd_duration: u64,
 
-    const relative_zap_bin = if (builtin.os.tag == .windows) "zig-out/bin/zap.exe" else "zig-out/bin/zap";
+    const relative_zap_bin = "zig-out/bin/zap" ++ platform.exe_ext;
 
-    fn getEnvWindows(name: []const u8, out_utf8: []u8) ?[]const u8 {
-        if (builtin.os.tag != .windows) return null;
-        const kernel32 = struct {
-            const WINAPI: std.builtin.CallingConvention = if (builtin.cpu.arch == .x86) .stdcall else .c;
-            extern "kernel32" fn GetEnvironmentVariableW(
-                lpName: [*:0]const u16,
-                lpBuffer: [*]u16,
-                nSize: u32,
-            ) callconv(WINAPI) u32;
-        };
-
-        var name_w: [64:0]u16 = undefined;
-        const name_len = std.unicode.utf8ToUtf16Le(&name_w, name) catch return null;
-        name_w[name_len] = 0;
-
-        var buf_w: [std.fs.max_path_bytes]u16 = undefined;
-        const len = kernel32.GetEnvironmentVariableW(&name_w, &buf_w, buf_w.len);
-        if (len == 0 or len >= buf_w.len) return null;
-
-        const utf8_len = std.unicode.utf16LeToUtf8(out_utf8, buf_w[0..len]) catch return null;
-        return out_utf8[0..utf8_len];
-    }
-
-    fn setEnvWindows(name: []const u8, value: ?[]const u8) void {
-        if (builtin.os.tag != .windows) return;
-        const kernel32 = struct {
-            const WINAPI: std.builtin.CallingConvention = if (builtin.cpu.arch == .x86) .stdcall else .c;
-            extern "kernel32" fn SetEnvironmentVariableW(
-                lpName: [*:0]const u16,
-                lpValue: ?[*:0]const u16,
-            ) callconv(WINAPI) c_int;
-        };
-
-        var name_w: [64:0]u16 = undefined;
-        const name_len = std.unicode.utf8ToUtf16Le(&name_w, name) catch return;
-        name_w[name_len] = 0;
-
-        if (value) |v| {
-            var val_w: [std.fs.max_path_bytes:0]u16 = undefined;
-            const val_len = std.unicode.utf8ToUtf16Le(&val_w, v) catch return;
-            val_w[val_len] = 0;
-            _ = kernel32.SetEnvironmentVariableW(&name_w, &val_w);
-        } else {
-            _ = kernel32.SetEnvironmentVariableW(&name_w, null);
-        }
-    }
+    pub const getEnvWindows = platform.getEnvWindows;
+    pub const setEnvWindows = platform.setEnvWindows;
 
     /// Create an isolated test environment with a fresh temporary directory.
     /// The zap binary must be pre-built (`zig build` runs before `zig build test`
@@ -133,20 +90,10 @@ pub const Harness = struct {
         // Create temp directory with random suffix outside the repository
         const random: std.Random.IoSource = .{ .io = io };
         const rand_id = random.interface().int(u64);
-        const tmp_dir = if (builtin.os.tag == .windows) blk: {
-            var env_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const temp_base = if (getEnvWindows("TEMP", &env_buf)) |t|
-                t
-            else if (getEnvWindows("TMP", &env_buf)) |t|
-                t
-            else if (getEnvWindows("USERPROFILE", &env_buf)) |u|
-                u
-            else
-                "C:\\Temp";
-            break :blk try std.fmt.allocPrint(alloc, "{s}\\zap-test-{x}", .{ temp_base, rand_id });
-        } else blk: {
-            break :blk try std.fmt.allocPrint(alloc, "/tmp/zap-test-{x}", .{rand_id});
-        };
+        var tmp_name_buf: [64]u8 = undefined;
+        const tmp_name = try std.fmt.bufPrint(&tmp_name_buf, "zap-test-{x}", .{rand_id});
+        var tmp_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const tmp_dir = try alloc.dupe(u8, try platform.testTempSubdir(&tmp_path_buf, tmp_name));
         try std.Io.Dir.cwd().createDirPath(io, tmp_dir);
 
         return .{
@@ -164,6 +111,7 @@ pub const Harness = struct {
 
     /// Clean up: remove temp directory and free all memory.
     pub fn destroy(self: *Harness) void {
+        setEnvWindows("ZAP_CONFIG", null);
         const io = std.testing.io;
         std.Io.Dir.cwd().deleteTree(io, self.tmp_dir) catch {};
         self.arena.deinit();
@@ -241,6 +189,23 @@ pub const Harness = struct {
         try std.Io.Dir.deleteFileAbsolute(std.testing.io, full_path);
     }
 
+    pub fn makeDir(self: *Harness, rel_path: []const u8) ![]const u8 {
+        const full_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}/{s}", .{ self.tmp_dir, rel_path });
+        try std.Io.Dir.cwd().createDirPath(std.testing.io, full_path);
+        return full_path;
+    }
+
+    pub fn makeSymlink(self: *Harness, target: []const u8, rel_link_path: []const u8) !?[]const u8 {
+        const link_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}/{s}", .{ self.tmp_dir, rel_link_path });
+        if (!platform.createSymlink(std.testing.io, target, link_path)) return null;
+        return link_path;
+    }
+
+    pub fn makeReadOnly(self: *Harness, dir_path: []const u8) !bool {
+        _ = self;
+        return platform.setDirReadOnly(std.testing.io, dir_path);
+    }
+
     /// Set a custom working directory relative to tmp_dir (or absolute) for this test.
     pub fn setCwd(self: *Harness, rel_or_abs: []const u8) !*Harness {
         if (std.fs.path.isAbsolute(rel_or_abs)) {
@@ -254,6 +219,11 @@ pub const Harness = struct {
     }
 
     /// Set a custom HOME directory relative to tmp_dir (or absolute) for this test.
+    pub fn setCwdRoot(self: *Harness) []const u8 {
+        self.custom_cwd = platform.fs_root;
+        return platform.fs_root;
+    }
+
     pub fn setHome(self: *Harness, rel_or_abs: []const u8) !*Harness {
         if (std.fs.path.isAbsolute(rel_or_abs)) {
             self.custom_home = rel_or_abs;
@@ -286,150 +256,31 @@ pub const Harness = struct {
     /// - `HOME` and `PWD` pointing to the tmpdir (or custom_home / custom_cwd)
     /// - `ZAP_CONFIG` pointing to the config file (if `setConfig()` was called)
     pub fn collect(self: *Harness, shell: Shell) ![]const u8 {
-        const alloc = self.arena.allocator();
-        const current_home = self.custom_home orelse self.tmp_dir;
-        const current_pwd = self.custom_cwd orelse self.tmp_dir;
-
-        // Format numeric args on stack
         var status_buf: [4]u8 = undefined;
         var duration_buf: [20]u8 = undefined;
         const status_str = std.fmt.bufPrint(&status_buf, "{d}", .{self.status_code}) catch "0";
         const duration_str = std.fmt.bufPrint(&duration_buf, "{d}", .{self.cmd_duration}) catch "0";
-        const shell_str: []const u8 = switch (shell) {
-            .bash => "bash",
-            .zsh => "zsh",
-            .fish => "fish",
-            .powershell => "powershell",
-            .generic => "generic",
+
+        const args = [_][]const u8{
+            "prompt",
+            "--status",
+            status_str,
+            "--duration",
+            duration_str,
+            "--shell",
+            @tagName(shell),
         };
-
-        var argv_buf: [24][]const u8 = undefined;
-        var argc: usize = 0;
-
-        if (builtin.os.tag == .windows) {
-            setEnvWindows("HOME", current_home);
-            setEnvWindows("USERPROFILE", current_home);
-            setEnvWindows("PWD", current_pwd);
-            var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const xdg_val = std.fmt.bufPrint(&xdg_buf, "{s}\\.config", .{current_home}) catch null;
-            setEnvWindows("XDG_CONFIG_HOME", xdg_val);
-            var appdata_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const appdata_val = std.fmt.bufPrint(&appdata_buf, "{s}\\AppData", .{current_home}) catch null;
-            setEnvWindows("APPDATA", appdata_val);
-
-            if (self.has_config) {
-                var cfg_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const cfg_val = std.fmt.bufPrint(&cfg_buf, "{s}\\config.toml", .{self.tmp_dir}) catch null;
-                setEnvWindows("ZAP_CONFIG", cfg_val);
-            } else {
-                setEnvWindows("ZAP_CONFIG", null);
-            }
-
-            argv_buf[argc] = self.zap_bin; argc += 1;
-            argv_buf[argc] = "prompt"; argc += 1;
-            argv_buf[argc] = "--status"; argc += 1;
-            argv_buf[argc] = status_str; argc += 1;
-            argv_buf[argc] = "--duration"; argc += 1;
-            argv_buf[argc] = duration_str; argc += 1;
-            argv_buf[argc] = "--shell"; argc += 1;
-            argv_buf[argc] = shell_str; argc += 1;
-        } else {
-            // Build env vars for `env` command to ensure 100% hermetic isolation from host environment
-            const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
-            const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
-            const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
-            const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
-            const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
-
-            argv_buf[argc] = "env"; argc += 1;
-            argv_buf[argc] = home_env; argc += 1;
-            argv_buf[argc] = userprofile_env; argc += 1;
-            argv_buf[argc] = pwd_env; argc += 1;
-            argv_buf[argc] = xdg_env; argc += 1;
-            argv_buf[argc] = appdata_env; argc += 1;
-
-            if (self.has_config) {
-                const config_env = try std.fmt.allocPrint(alloc, "ZAP_CONFIG={s}/config.toml", .{self.tmp_dir});
-                argv_buf[argc] = config_env; argc += 1;
-            } else {
-                argv_buf[argc] = "ZAP_CONFIG="; argc += 1;
-            }
-
-            argv_buf[argc] = self.zap_bin; argc += 1;
-            argv_buf[argc] = "prompt"; argc += 1;
-            argv_buf[argc] = "--status"; argc += 1;
-            argv_buf[argc] = status_str; argc += 1;
-            argv_buf[argc] = "--duration"; argc += 1;
-            argv_buf[argc] = duration_str; argc += 1;
-            argv_buf[argc] = "--shell"; argc += 1;
-            argv_buf[argc] = shell_str; argc += 1;
+        const res = try self.spawnZap(&args, self.has_config);
+        if (res.exit_code != 0) {
+            std.debug.print(
+                \\
+                \\[HARNESS ERROR] zap prompt exited with code {d}
+                \\[HARNESS ERROR] Stderr: {s}
+                \\
+            , .{ res.exit_code, res.stderr });
+            return error.ZapExitedWithError;
         }
-
-        const io = std.testing.io;
-        var child = std.process.spawn(io, .{
-            .argv = argv_buf[0..argc],
-            .cwd = .{ .path = current_pwd },
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .stdin = .ignore,
-        }) catch |err| {
-            std.debug.print("[HARNESS] Failed to spawn: {any}\n", .{err});
-            return err;
-        };
-
-        var stream_buf: [512]u8 = undefined;
-        var reader = child.stdout.?.reader(io, &stream_buf);
-        var out_buf: [65536]u8 = undefined;
-        var total_read: usize = 0;
-
-        while (total_read < out_buf.len) {
-            const n = reader.interface.readSliceShort(out_buf[total_read..]) catch |err| {
-                std.debug.print("[HARNESS] Stdout read error: {any}\n", .{err});
-                return err;
-            };
-            if (n == 0) break;
-            total_read += n;
-        }
-
-        var err_stream_buf: [256]u8 = undefined;
-        var err_reader = child.stderr.?.reader(io, &err_stream_buf);
-        var err_buf: [4096]u8 = undefined;
-        var err_read: usize = 0;
-        while (err_read < err_buf.len) {
-            const n = err_reader.interface.readSliceShort(err_buf[err_read..]) catch |err| {
-                std.debug.print("[HARNESS] Stderr read error: {any}\n", .{err});
-                return err;
-            };
-            if (n == 0) break;
-            err_read += n;
-        }
-
-        const term = child.wait(io) catch return error.ZapCrashed;
-        switch (term) {
-            .exited => |code| {
-                if (code != 0) {
-                    std.debug.print(
-                        \\
-                        \\[HARNESS ERROR] zap prompt exited with code {d}
-                        \\[HARNESS ERROR] Stderr: {s}
-                        \\
-                    , .{ code, err_buf[0..err_read] });
-                    return error.ZapExitedWithError;
-                }
-            },
-            else => {
-                std.debug.print(
-                    \\
-                    \\[HARNESS ERROR] zap prompt terminated abnormally
-                    \\[HARNESS ERROR] Stderr: {s}
-                    \\
-                , .{err_buf[0..err_read]});
-                return error.ZapCrashed;
-            },
-        }
-
-        const out_copy = try alloc.dupe(u8, out_buf[0..total_read]);
-        return out_copy;
+        return res.stdout;
     }
 
     pub const ExecResult = struct {
@@ -438,7 +289,6 @@ pub const Harness = struct {
         exit_code: u8,
     };
 
-    /// Spawns the zap binary with custom CLI arguments and returns stdout on success.
     pub fn execZap(self: *Harness, args: []const []const u8) ![]const u8 {
         const res = try self.execZapAllowFail(args);
         if (res.exit_code != 0) {
@@ -454,59 +304,37 @@ pub const Harness = struct {
         return res.stdout;
     }
 
-    /// Spawns the zap binary with custom CLI arguments and returns ExecResult.
     pub fn execZapAllowFail(self: *Harness, args: []const []const u8) !ExecResult {
+        return self.spawnZap(args, false);
+    }
+
+    fn spawnZap(self: *Harness, args: []const []const u8, use_harness_config: bool) !ExecResult {
         const alloc = self.arena.allocator();
         const current_home = self.custom_home orelse self.tmp_dir;
         const current_pwd = self.custom_cwd orelse self.tmp_dir;
 
-        var full_argv: [][]const u8 = undefined;
-        var argc: usize = 0;
+        var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const xdg_val = platform.joinPath(&xdg_buf, current_home, ".config");
+        var appdata_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const appdata_val = platform.joinPath(&appdata_buf, current_home, "AppData");
+        var cfg_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const cfg_val = if (use_harness_config) platform.joinPath(&cfg_buf, self.tmp_dir, "config.toml") else null;
 
-        if (builtin.os.tag == .windows) {
-            setEnvWindows("HOME", current_home);
-            setEnvWindows("USERPROFILE", current_home);
-            setEnvWindows("PWD", current_pwd);
-            var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const xdg_val = std.fmt.bufPrint(&xdg_buf, "{s}\\.config", .{current_home}) catch null;
-            setEnvWindows("XDG_CONFIG_HOME", xdg_val);
-            var appdata_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const appdata_val = std.fmt.bufPrint(&appdata_buf, "{s}\\AppData", .{current_home}) catch null;
-            setEnvWindows("APPDATA", appdata_val);
-            setEnvWindows("ZAP_CONFIG", null);
+        const env_vars = [_]platform.EnvEntry{
+            .{ .key = "HOME", .value = current_home },
+            .{ .key = "USERPROFILE", .value = current_home },
+            .{ .key = "PWD", .value = current_pwd },
+            .{ .key = "XDG_CONFIG_HOME", .value = xdg_val },
+            .{ .key = "APPDATA", .value = appdata_val },
+            .{ .key = "ZAP_CONFIG", .value = cfg_val },
+        };
 
-            full_argv = try alloc.alloc([]const u8, 1 + args.len);
-            full_argv[0] = self.zap_bin;
-            @memcpy(full_argv[1..], args);
-            argc = 1 + args.len;
-        } else {
-            const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{current_home});
-            const userprofile_env = try std.fmt.allocPrint(alloc, "USERPROFILE={s}", .{current_home});
-            const pwd_env = try std.fmt.allocPrint(alloc, "PWD={s}", .{current_pwd});
-            const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{current_home});
-            const appdata_env = try std.fmt.allocPrint(alloc, "APPDATA={s}/AppData", .{current_home});
-
-            full_argv = try alloc.alloc([]const u8, 7 + args.len);
-            full_argv[argc] = "env"; argc += 1;
-            full_argv[argc] = home_env; argc += 1;
-            full_argv[argc] = userprofile_env; argc += 1;
-            full_argv[argc] = pwd_env; argc += 1;
-            full_argv[argc] = xdg_env; argc += 1;
-            full_argv[argc] = appdata_env; argc += 1;
-            full_argv[argc] = self.zap_bin; argc += 1;
-            @memcpy(full_argv[argc .. argc + args.len], args);
-            argc += args.len;
-        }
+        const full_argv = try alloc.alloc([]const u8, 1 + args.len);
+        full_argv[0] = self.zap_bin;
+        @memcpy(full_argv[1..], args);
 
         const io = std.testing.io;
-        var child = try std.process.spawn(io, .{
-            .argv = full_argv[0..argc],
-            .cwd = .{ .path = current_pwd },
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .stdin = .ignore,
-        });
-
+        var child = try platform.spawnWithEnv(io, alloc, current_pwd, &env_vars, full_argv);
         var stream_buf: [512]u8 = undefined;
         var reader = child.stdout.?.reader(io, &stream_buf);
         var out_buf: [65536]u8 = undefined;
@@ -539,7 +367,6 @@ pub const Harness = struct {
             .exit_code = code,
         };
     }
-
 
     /// Run `zap prompt`, then pipe the output through a real shell to validate
     /// it doesn't crash or produce syntax errors in that shell.
@@ -578,69 +405,12 @@ pub const Harness = struct {
 
     // ─── Assertions ───────────────────────────────────────────
 
-    /// Assert the output contains the expected substring.
-    pub fn expectContains(haystack: []const u8, needle: []const u8) !void {
-        if (std.mem.indexOf(u8, haystack, needle) == null) {
-            std.debug.print(
-                \\
-                \\[ASSERT FAIL] Expected output to contain: "{s}"
-                \\[ASSERT FAIL] Actual output ({d} bytes):
-                \\──────────────────
-                \\{s}
-                \\──────────────────
-                \\
-            , .{ needle, haystack.len, haystack });
-            return error.TestExpectedContains;
-        }
-    }
-
-    /// Assert the output does NOT contain the substring.
-    pub fn expectNotContains(haystack: []const u8, needle: []const u8) !void {
-        if (std.mem.indexOf(u8, haystack, needle) != null) {
-            std.debug.print(
-                \\
-                \\[ASSERT FAIL] Expected output to NOT contain: "{s}"
-                \\[ASSERT FAIL] Actual output: {s}
-                \\
-            , .{ needle, haystack });
-            return error.TestExpectedNotContains;
-        }
-    }
-
-    /// Assert the output is not empty.
-    pub fn expectNotEmpty(output: []const u8) !void {
-        if (output.len == 0) {
-            std.debug.print("\n[ASSERT FAIL] Expected non-empty output\n", .{});
-            return error.TestExpectedNotEmpty;
-        }
-    }
-
-    /// Assert ANSI escape sequences are correctly wrapped for the given shell.
-    /// Delegates to the existing Fixture validator.
-    pub fn expectAnsi(output: []const u8, shell: Shell) !void {
-        Fixture.assertValidShellAnsi(output, shell) catch |err| {
-            std.debug.print(
-                \\
-                \\[ASSERT FAIL] Invalid ANSI escapes for shell {s}: {any}
-                \\[ASSERT FAIL] Output: {s}
-                \\
-            , .{ @tagName(shell), err, output });
-            return err;
-        };
-    }
-
-    /// Strip ANSI escape sequences and zero-width markers for raw text comparisons.
-    pub fn stripAnsi(alloc: std.mem.Allocator, text: []const u8) ![]const u8 {
-        return Fixture.stripAnsi(alloc, text);
-    }
-
-    /// Assert the rendered prompt contains visible text (strips ANSI escapes first).
-    pub fn expectVisibleText(output: []const u8, expected: []const u8) !void {
-        var stack_buf: [4096]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&stack_buf);
-        const stripped = Fixture.stripAnsi(fba.allocator(), output) catch output;
-        try expectContains(stripped, expected);
-    }
+    pub const expectContains = assertions.expectContains;
+    pub const expectNotContains = assertions.expectNotContains;
+    pub const expectNotEmpty = assertions.expectNotEmpty;
+    pub const expectAnsi = assertions.expectAnsi;
+    pub const stripAnsi = assertions.stripAnsi;
+    pub const expectVisibleText = assertions.expectVisibleText;
 
     /// Helper: asserts that ALL 4 shells (Bash, Zsh, Fish, PowerShell) produce
     /// valid ANSI wrapping AND contain the expected substring.

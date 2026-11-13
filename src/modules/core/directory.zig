@@ -203,14 +203,14 @@ test "integration: directory at filesystem root" {
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();
 
-    _ = try h.setCwd("/");
+    const root_dir = h.setCwdRoot();
     try h.setConfig(
         \\format = "$directory"
         \\add_newline = false
     );
 
     const out = try h.collectAllShells();
-    try Harness.expectVisibleText(out, "/");
+    try Harness.expectVisibleText(out, root_dir);
 }
 
 test "integration: directory outside home renders full or truncated path" {
@@ -232,17 +232,11 @@ test "integration: directory outside home renders full or truncated path" {
 }
 
 test "integration: directory read_only rendering" {
-    if (@import("builtin").os.tag == .windows) return; // chmod not supported on windows
-
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();
 
     _ = try h.setCwd("readonly_dir");
-    const io = std.testing.io;
-    var child = std.process.spawn(io, .{
-        .argv = &[_][]const u8{ "chmod", "555", h.custom_cwd.? },
-    }) catch return;
-    _ = child.wait(io) catch {};
+    if (!try h.makeReadOnly(h.custom_cwd.?)) return;
 
     try h.setConfig(
         \\format = "$directory"
@@ -257,8 +251,6 @@ test "integration: directory read_only rendering" {
 }
 
 test "integration: directory symlink rendering" {
-    if (@import("builtin").os.tag == .windows) return;
-
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();
 
@@ -266,17 +258,7 @@ test "integration: directory symlink rendering" {
     _ = try h.setCwd("real_target_dir");
     const real_target = h.custom_cwd.?;
 
-    // Create a symlink in temp dir pointing to real_target_dir
-    const io = std.testing.io;
-    const symlink_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/symlinked_link", .{h.tmp_dir});
-    defer std.testing.allocator.free(symlink_path);
-
-    var child = std.process.spawn(io, .{
-        .argv = &[_][]const u8{ "ln", "-s", real_target, symlink_path },
-    }) catch return;
-    _ = child.wait(io) catch return;
-
-    // Set custom CWD to the symlink path
+    const symlink_path = (try h.makeSymlink(real_target, "symlinked_link")) orelse return;
     h.custom_cwd = symlink_path;
 
     try h.setConfig(

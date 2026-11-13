@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 
 /// Parses a .git pointer file (common in git worktrees and submodules) with format "gitdir: <path>".
 pub fn parseGitDirPointer(content_raw: []const u8) ?[]const u8 {
@@ -18,7 +19,7 @@ pub fn findGitDir(
     var current: []const u8 = cwd;
 
     while (current.len > 0) {
-        const git_path = std.fmt.bufPrint(out_buf, "{s}/.git", .{current}) catch return null;
+        const git_path = platform.joinPath(out_buf, current, ".git") orelse return null;
 
         // Try opening .git as a directory
         if (std.Io.Dir.openDirAbsolute(io, git_path, .{})) |dir| {
@@ -64,7 +65,7 @@ pub fn findRepoRoot(
 
     while (current.len > 0) {
         var git_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const git_path = std.fmt.bufPrint(&git_path_buf, "{s}/.git", .{current}) catch return null;
+        const git_path = platform.joinPath(&git_path_buf, current, ".git") orelse return null;
 
         // Check if .git is a directory
         if (std.Io.Dir.openDirAbsolute(io, git_path, .{})) |dir| {
@@ -89,10 +90,16 @@ pub fn findRepoRoot(
 
 /// Extracts repository root from a known git_dir path without filesystem I/O.
 pub fn gitDirToRepoRoot(git_dir: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, git_dir, "/.git")) {
+    if (std.mem.endsWith(u8, git_dir, "/.git") or std.mem.endsWith(u8, git_dir, "\\.git")) {
         return git_dir[0 .. git_dir.len - "/.git".len];
     }
     if (std.mem.indexOf(u8, git_dir, "/.git/worktrees/")) |wt_idx| {
+        return git_dir[0..wt_idx];
+    }
+    if (std.mem.indexOf(u8, git_dir, "\\.git\\worktrees\\")) |wt_idx| {
+        return git_dir[0..wt_idx];
+    }
+    if (std.mem.indexOf(u8, git_dir, "\\.git/worktrees/")) |wt_idx| {
         return git_dir[0..wt_idx];
     }
     return std.fs.path.dirname(git_dir) orelse git_dir;
@@ -109,4 +116,6 @@ test "unit: parseGitDirPointer parses valid and invalid pointers" {
 test "unit: gitDirToRepoRoot extracts repo root" {
     try std.testing.expectEqualStrings("/home/user/zap", gitDirToRepoRoot("/home/user/zap/.git"));
     try std.testing.expectEqualStrings("/home/user/zap", gitDirToRepoRoot("/home/user/zap/.git/worktrees/feature"));
+    try std.testing.expectEqualStrings("C:\\Users\\user\\zap", gitDirToRepoRoot("C:\\Users\\user\\zap\\.git"));
+    try std.testing.expectEqualStrings("C:\\Users\\user\\zap", gitDirToRepoRoot("C:\\Users\\user\\zap\\.git\\worktrees\\feature"));
 }

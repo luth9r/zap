@@ -236,7 +236,8 @@ const testing = std.testing;
 
 test "unit: hasStash detects stash existence" {
     const io = testing.io;
-    const tmp = "/tmp/zap_test_stash_unit";
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp = try fs.testTempSubdir(&tmp_buf, "zap_test_stash_unit");
     std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
     std.Io.Dir.cwd().createDirPath(io, tmp) catch return;
     defer std.Io.Dir.cwd().deleteTree(io, tmp) catch {};

@@ -1,7 +1,25 @@
 const std = @import("std");
 const context = @import("../../../engine/context.zig");
 const toml_parser = @import("../../../config/toml_parser.zig");
+const install = @import("../../../init/install.zig");
 const DebugContext = context.DebugContext;
+
+fn escapeJson(buf: []u8, input: []const u8) []const u8 {
+    var pos: usize = 0;
+    for (input) |c| {
+        if (c == '\\' or c == '"') {
+            if (pos + 2 > buf.len) break;
+            buf[pos] = '\\';
+            buf[pos + 1] = c;
+            pos += 2;
+        } else {
+            if (pos + 1 > buf.len) break;
+            buf[pos] = c;
+            pos += 1;
+        }
+    }
+    return buf[0..pos];
+}
 
 fn checkFileContains(io: std.Io, path: []const u8, needle: []const u8) bool {
     var buf: [16384]u8 = undefined;
@@ -44,42 +62,47 @@ pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext
     const resolved_cfg_path = toml_parser.resolveExistingConfigPath(io, &cfg_path_buf, init.environ_map);
 
     var bash_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const bash_rc = std.fmt.bufPrint(&bash_hook_path, "{s}/.bashrc", .{dctx.prompt.home}) catch "";
+    const bash_rc = install.resolveShellConfigFile(io, .bash, dctx.prompt.home, &bash_hook_path) orelse "";
     const bash_hook = checkFileContains(io, bash_rc, "zap init bash") or checkFileContains(io, bash_rc, "zap prompt");
 
     var zsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const zsh_rc = std.fmt.bufPrint(&zsh_hook_path, "{s}/.zshrc", .{dctx.prompt.home}) catch "";
+    const zsh_rc = install.resolveShellConfigFile(io, .zsh, dctx.prompt.home, &zsh_hook_path) orelse "";
     const zsh_hook = checkFileContains(io, zsh_rc, "zap init zsh") or checkFileContains(io, zsh_rc, "zap prompt");
 
     var fish_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const fish_rc = std.fmt.bufPrint(&fish_hook_path, "{s}/.config/fish/config.fish", .{dctx.prompt.home}) catch "";
+    const fish_rc = install.resolveShellConfigFile(io, .fish, dctx.prompt.home, &fish_hook_path) orelse "";
     const fish_hook = checkFileContains(io, fish_rc, "zap init fish") or checkFileContains(io, fish_rc, "zap prompt");
 
     var pwsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const pwsh_rc = std.fmt.bufPrint(&pwsh_hook_path, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{dctx.prompt.home}) catch "";
+    const pwsh_rc = install.resolveShellConfigFile(io, .powershell, dctx.prompt.home, &pwsh_hook_path) orelse "";
     const pwsh_hook = checkFileContains(io, pwsh_rc, "zap init powershell") or checkFileContains(io, pwsh_rc, "zap prompt");
 
     if (dctx.json) {
+        var j_shell_env: [std.fs.max_path_bytes]u8 = undefined;
+        var j_home: [std.fs.max_path_bytes]u8 = undefined;
+        var j_cwd: [std.fs.max_path_bytes]u8 = undefined;
+        var j_zc: [std.fs.max_path_bytes]u8 = undefined;
+        var j_rc: [std.fs.max_path_bytes]u8 = undefined;
         try writer.print(
             \\{{ "target": "env", "shell": "{s}", "shell_path": "{s}", "term": "{s}", "term_program": "{s}", "color_support": {{ "truecolor": {}, "color_256": {} }}, "utf8_locale": {}, "locale": "{s}", "variables": {{ "HOME": "{s}", "PWD": "{s}", "ZAP_CONFIG": {s}{s}{s}, "SHLVL": "{s}" }}, "config": {{ "resolved_path": {s}{s}{s}, "exists": {} }}, "hooks": {{ "bash": {}, "zsh": {}, "fish": {}, "powershell": {} }} }}
             \\
         , .{
             shell_name,
-            shell_env,
+            escapeJson(&j_shell_env, shell_env),
             term,
             term_program,
             has_truecolor,
             has_256color,
             is_utf8,
             lang,
-            dctx.prompt.home,
-            dctx.prompt.cwd,
+            escapeJson(&j_home, dctx.prompt.home),
+            escapeJson(&j_cwd, dctx.prompt.cwd),
             if (zap_config_env != null) "\"" else "",
-            if (zap_config_env) |zc| zc else "null",
+            if (zap_config_env) |zc| escapeJson(&j_zc, zc) else "null",
             if (zap_config_env != null) "\"" else "",
             shlvl,
             if (resolved_cfg_path != null) "\"" else "",
-            if (resolved_cfg_path) |rc| rc else "null",
+            if (resolved_cfg_path) |rc| escapeJson(&j_rc, rc) else "null",
             if (resolved_cfg_path != null) "\"" else "",
             resolved_cfg_path != null,
             bash_hook,
@@ -150,36 +173,41 @@ pub fn printShellDebug(init: std.process.Init, writer: anytype, dctx: DebugConte
     const shell_name = if (shell_env.len > 0) std.fs.path.basename(shell_env) else "unknown";
 
     var bash_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const bash_rc = std.fmt.bufPrint(&bash_hook_path, "{s}/.bashrc", .{dctx.prompt.home}) catch "";
+    const bash_rc = install.resolveShellConfigFile(io, .bash, dctx.prompt.home, &bash_hook_path) orelse "";
     const bash_hook = checkFileContains(io, bash_rc, "zap init bash") or checkFileContains(io, bash_rc, "zap prompt");
 
     var zsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const zsh_rc = std.fmt.bufPrint(&zsh_hook_path, "{s}/.zshrc", .{dctx.prompt.home}) catch "";
+    const zsh_rc = install.resolveShellConfigFile(io, .zsh, dctx.prompt.home, &zsh_hook_path) orelse "";
     const zsh_hook = checkFileContains(io, zsh_rc, "zap init zsh") or checkFileContains(io, zsh_rc, "zap prompt");
 
     var fish_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const fish_rc = std.fmt.bufPrint(&fish_hook_path, "{s}/.config/fish/config.fish", .{dctx.prompt.home}) catch "";
+    const fish_rc = install.resolveShellConfigFile(io, .fish, dctx.prompt.home, &fish_hook_path) orelse "";
     const fish_hook = checkFileContains(io, fish_rc, "zap init fish") or checkFileContains(io, fish_rc, "zap prompt");
 
     var pwsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const pwsh_rc = std.fmt.bufPrint(&pwsh_hook_path, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{dctx.prompt.home}) catch "";
+    const pwsh_rc = install.resolveShellConfigFile(io, .powershell, dctx.prompt.home, &pwsh_hook_path) orelse "";
     const pwsh_hook = checkFileContains(io, pwsh_rc, "zap init powershell") or checkFileContains(io, pwsh_rc, "zap prompt");
 
     if (dctx.json) {
+        var j_shell_env: [std.fs.max_path_bytes]u8 = undefined;
+        var j_bash_rc: [std.fs.max_path_bytes]u8 = undefined;
+        var j_zsh_rc: [std.fs.max_path_bytes]u8 = undefined;
+        var j_fish_rc: [std.fs.max_path_bytes]u8 = undefined;
+        var j_pwsh_rc: [std.fs.max_path_bytes]u8 = undefined;
         try writer.print(
             \\{{ "target": "shell", "detected_shell": "{s}", "shell_path": "{s}", "hooks": {{ "bash": {{ "installed": {}, "rc_path": "{s}", "right_prompt": false }}, "zsh": {{ "installed": {}, "rc_path": "{s}", "right_prompt": true }}, "fish": {{ "installed": {}, "rc_path": "{s}", "right_prompt": true }}, "powershell": {{ "installed": {}, "rc_path": "{s}", "right_prompt": false }} }} }}
             \\
         , .{
             shell_name,
-            shell_env,
+            escapeJson(&j_shell_env, shell_env),
             bash_hook,
-            bash_rc,
+            escapeJson(&j_bash_rc, bash_rc),
             zsh_hook,
-            zsh_rc,
+            escapeJson(&j_zsh_rc, zsh_rc),
             fish_hook,
-            fish_rc,
+            escapeJson(&j_fish_rc, fish_rc),
             pwsh_hook,
-            pwsh_rc,
+            escapeJson(&j_pwsh_rc, pwsh_rc),
         });
         return;
     }

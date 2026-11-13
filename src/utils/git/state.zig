@@ -125,7 +125,8 @@ test "unit: getGitState returns none on clean repo" {
     var cur_buf: [32]u8 = undefined;
     var tot_buf: [32]u8 = undefined;
 
-    const tmp = "/tmp/zap_test_git_state_clean";
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp = try fs.testTempSubdir(&tmp_buf, "zap_test_git_state_clean");
     std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
     try std.Io.Dir.cwd().createDirPath(io, tmp);
     defer std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
@@ -141,7 +142,8 @@ test "unit: getGitState detects merge, cherry-pick, revert, bisect" {
     var cur_buf: [32]u8 = undefined;
     var tot_buf: [32]u8 = undefined;
 
-    const tmp = "/tmp/zap_test_git_state_markers";
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp = try fs.testTempSubdir(&tmp_buf, "zap_test_git_state_markers");
     std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
     try std.Io.Dir.cwd().createDirPath(io, tmp);
     defer std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
@@ -183,7 +185,8 @@ test "unit: getGitState detects rebase-merge with progress steps" {
     var cur_buf: [32]u8 = undefined;
     var tot_buf: [32]u8 = undefined;
 
-    const tmp = "/tmp/zap_test_git_state_rebase";
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp = try fs.testTempSubdir(&tmp_buf, "zap_test_git_state_rebase");
     std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
     try std.Io.Dir.cwd().createDirPath(io, tmp);
     defer std.Io.Dir.cwd().deleteTree(io, tmp) catch {};
