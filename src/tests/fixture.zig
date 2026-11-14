@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const builtin = @import("builtin");
 const Config = @import("../config/config.zig").Config;
 const PromptContext = @import("../engine/context.zig").PromptContext;
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
@@ -103,7 +102,7 @@ pub const Fixture = struct {
                             return error.MissingZshZeroWidthEnd;
                         }
                     },
-                    .fish, .powershell, .generic => {
+                    .fish, .powershell, .cmd, .generic => {
                         // Must NOT be wrapped in \x01..\x02 or %{..%}
                         if (i > 0 and rendered[i - 1] == 0x01) return error.UnexpectedBashMarker;
                         if (i >= 2 and rendered[i - 2] == '%' and rendered[i - 1] == '{') return error.UnexpectedZshMarker;
@@ -115,7 +114,7 @@ pub const Fixture = struct {
 
             // General zero-width leaks check for non-wrapped shells
             switch (shell) {
-                .fish, .powershell, .generic => {
+                .fish, .powershell, .cmd, .generic => {
                     if (rendered[i] == 0x01 or rendered[i] == 0x02) return error.UnexpectedBashMarker;
                     if (rendered[i] == '%' and i + 1 < rendered.len and (rendered[i + 1] == '{' or rendered[i + 1] == '}')) {
                         return error.UnexpectedZshMarker;
@@ -135,78 +134,39 @@ pub const Fixture = struct {
         }
     }
 
+    const ENV_ZAP_PROMPT = "ZAP_PROMPT";
+
     pub fn execInShell(
         io: std.Io,
         shell: Shell,
         raw_prompt: []const u8,
         out_buf: []u8,
     ) !?[]const u8 {
-        const bin: []const u8 = switch (shell) {
-            .bash => "bash",
-            .zsh => "zsh",
-            .fish => "fish",
-            .powershell => if (builtin.os.tag == .windows) "powershell.exe" else "pwsh",
-            .generic => return error.UnsupportedShell,
+        if (platform.is_windows and shell != .powershell) return null;
+
+        const argv: []const []const u8 = switch (shell) {
+            .bash => &.{ "bash", "--noprofile", "--norc", "-c", "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"" },
+            .zsh => &.{ "zsh", "-f", "+Z", "-c", "print -nP \"$ZAP_PROMPT\"" },
+            .fish => &.{ "fish", "--no-config", "-c", "echo -n \"$ZAP_PROMPT\"" },
+            .powershell => &.{ platform.powershell_bin, "-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write($env:ZAP_PROMPT)" },
+            .cmd, .generic => return null,
         };
 
-        var prompt_env_buf: [4096]u8 = undefined;
-        const prompt_env = try std.fmt.bufPrint(&prompt_env_buf, "ZAP_PROMPT={s}", .{raw_prompt});
-
-        if (builtin.os.tag == .windows) {
-            if (shell != .powershell) return null;
-            platform.setEnvWindows("ZAP_PROMPT", raw_prompt);
-        }
-        defer if (builtin.os.tag == .windows) platform.setEnvWindows("ZAP_PROMPT", null);
-
-        const argv: []const []const u8 = if (builtin.os.tag == .windows) switch (shell) {
-            .bash => &.{ bin, "--noprofile", "--norc", "-c", "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"" },
-            .zsh => &.{ bin, "-f", "+Z", "-c", "print -nP \"$ZAP_PROMPT\"" },
-            .fish => &.{ bin, "--no-config", "-c", "echo -n \"$ZAP_PROMPT\"" },
-            .powershell => &.{ bin, "-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write($env:ZAP_PROMPT)" },
-            .generic => return error.UnsupportedShell,
-        } else switch (shell) {
-            .bash => &.{ "env", prompt_env, bin, "--noprofile", "--norc", "-c", "PS1=\"$ZAP_PROMPT\"; echo -n \"$PS1\"" },
-            .zsh => &.{ "env", prompt_env, bin, "-f", "+Z", "-c", "print -nP \"$ZAP_PROMPT\"" },
-            .fish => &.{ "env", prompt_env, bin, "--no-config", "-c", "echo -n \"$ZAP_PROMPT\"" },
-            .powershell => &.{ "env", prompt_env, bin, "-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write($env:ZAP_PROMPT)" },
-            .generic => return error.UnsupportedShell,
+        var fba_buf: [8192]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&fba_buf);
+        const env_vars = [_]platform.EnvEntry{
+            .{ .key = ENV_ZAP_PROMPT, .value = raw_prompt },
         };
+        defer if (platform.is_windows) platform.setEnvWindows(ENV_ZAP_PROMPT, null);
 
-        var child = std.process.spawn(io, .{
-            .argv = argv,
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .stdin = .ignore,
-        }) catch |err| switch (err) {
+        var child = platform.spawnWithEnv(io, fba.allocator(), null, &env_vars, argv) catch |err| switch (err) {
             error.FileNotFound => return null, // Shell binary is not installed on this machine — safely skip
             else => return err,
         };
 
-        var stream_buf: [512]u8 = undefined;
-        var reader = child.stdout.?.reader(io, &stream_buf);
-        var total_read: usize = 0;
-
-        while (total_read < out_buf.len) {
-            const n = reader.interface.readSliceShort(out_buf[total_read..]) catch |err| {
-                std.debug.print("[SHELL] Stdout read error: {any}\n", .{err});
-                return err;
-            };
-            if (n == 0) break;
-            total_read += n;
-        }
-
-        var err_stream_buf: [256]u8 = undefined;
-        var err_reader = child.stderr.?.reader(io, &err_stream_buf);
         var err_buf: [2048]u8 = undefined;
-        var err_read: usize = 0;
-        while (err_read < err_buf.len) {
-            const n = err_reader.interface.readSliceShort(err_buf[err_read..]) catch |err| {
-                std.debug.print("[SHELL] Stderr read error: {any}\n", .{err});
-                return err;
-            };
-            if (n == 0) break;
-            err_read += n;
-        }
+        const total_read = platform.readStreamToBuf(io, child.stdout.?, out_buf);
+        const err_read = platform.readStreamToBuf(io, child.stderr.?, &err_buf);
 
         const term = child.wait(io) catch return null;
         switch (term) {
@@ -221,12 +181,12 @@ pub const Fixture = struct {
                     \\[SHELL ERROR] Stderr: {s}
                     \\[SHELL ERROR] Raw Prompt: {s}
                     \\
-                , .{ bin, code, err_buf[0..err_read], raw_prompt });
+                , .{ argv[0], code, err_buf[0..err_read], raw_prompt });
                 return error.ShellExecutionFailed;
             },
             .signal => |sig| {
                 // Shell killed by environment / sandbox signal (e.g. SIGABRT, SIGSYS) - skip external execution
-                std.debug.print("[SHELL WARN] {s} killed by signal {d}, skipping subshell execution\n", .{ bin, sig });
+                std.debug.print("[SHELL WARN] {s} killed by signal {d}, skipping subshell execution\n", .{ argv[0], sig });
                 return null;
             },
             else => return null,
@@ -242,7 +202,7 @@ pub const Fixture = struct {
         io: std.Io,
         predicate: *const fn (shell: Shell, rendered: []const u8, term_out: []const u8) anyerror!void,
     ) !void {
-        const shells = [_]Shell{ .bash, .zsh, .fish, .powershell };
+        const shells = [_]Shell{ .bash, .zsh, .fish, .powershell, .cmd };
         var buf: [2048]u8 = undefined;
         var shell_out_buf: [4096]u8 = undefined;
 

@@ -176,7 +176,7 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
                     \\
                     \\  CWD:        {s}
                     \\  Files:      
-                , .{ dctx.prompt.cwd });
+                , .{dctx.prompt.cwd});
                 for (spec.files, 0..) |file, idx| {
                     if (idx > 0) try writer.writeAll(", ");
                     try writer.print("{s}", .{file});
@@ -288,7 +288,7 @@ pub fn GenericFileModule(comptime spec: FileSpec) type {
                     \\
                     \\  CWD:        {s}
                     \\  Files:      
-                , .{ dctx.prompt.cwd });
+                , .{dctx.prompt.cwd});
                 for (spec.files, 0..) |file, idx| {
                     if (idx > 0) try writer.writeAll(", ");
                     try writer.print("{s}", .{file});

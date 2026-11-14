@@ -247,7 +247,7 @@ pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !
             try writer.writeAll(ansi_seq);
             try writer.writeAll("%}");
         },
-        .fish, .powershell, .generic => {
+        .fish, .powershell, .cmd, .generic => {
             try writer.writeAll(ansi_seq);
         },
     }
@@ -421,7 +421,6 @@ fn parseConditionalGroup(raw: []const u8, start_idx: usize) ?ConditionalGroup {
 
     return null;
 }
-
 
 const TestVar = enum { user, host, price, symbol, duration, path, missing, text, version };
 test "unit: plain text template" {
@@ -655,5 +654,3 @@ test "unit: conditional group wrapping styled block with $style skips when conte
     defer a.free(res_non_empty);
     try testing.expectEqualStrings("\x1b[1;31m[!+]\x1b[0m ", res_non_empty);
 }
-
-

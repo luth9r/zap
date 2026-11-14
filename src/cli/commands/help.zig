@@ -30,7 +30,7 @@ pub fn printHelp(writer: anytype) !void {
         \\OPTIONS for 'prompt':
         \\    --status, -s <code >      Exit code of the previous command (default: 0)
         \\    --duration, -d <ms>       Execution duration of the previous command in ms
-        \\    --shell, -sh <shell>      Target shell (bash, zsh, fish, powershell, generic)
+        \\    --shell, -sh <shell>      Target shell (bash, zsh, fish, powershell, cmd, generic)
         \\    --config, -c <path>       Custom path to configuration file (default: ~/.config/zap/zap.toml)
         \\    --no-newline              Suppress leading newline (used for first prompt / after clear)
         \\    --right, -r               Render right-aligned prompt using 'right_format'

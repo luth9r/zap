@@ -131,4 +131,3 @@ test "integration: character disabled in config" {
     const out = try h.collect(.generic);
     try std.testing.expectEqual(@as(usize, 0), out.len);
 }
-

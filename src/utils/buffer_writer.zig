@@ -79,4 +79,3 @@ test "unit: BufferWriter print with formatting and safe truncation" {
     try testing.expectEqual(@as(usize, 12), pos);
     try testing.expectEqual(@as(usize, 12), writer.written().len);
 }
-

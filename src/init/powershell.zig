@@ -77,7 +77,9 @@ test "integration: real powershell session with auto-installed zap hook and conf
     var h = try Harness.create(testing.allocator);
     defer h.destroy();
 
-    const builtin = @import("builtin");
+    const platform = @import("../utils/platform.zig");
+    const install = @import("install.zig");
+
     try h.setupGit();
     try h.git(&.{ "checkout", "-b", "pwsh-branch" });
 
@@ -89,74 +91,19 @@ test "integration: real powershell session with auto-installed zap hook and conf
     const install_res = try h.execZapAllowFail(&.{ "init", "powershell", "--install" });
     try testing.expectEqual(@as(u8, 0), install_res.exit_code);
 
-    const alloc = h.arena.allocator();
-    const profile_path = if (builtin.os.tag == .windows)
-        try std.fmt.allocPrint(alloc, "{s}\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1", .{h.tmp_dir})
-    else
-        try std.fmt.allocPrint(alloc, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{h.tmp_dir});
+    var profile_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const profile_path = install.resolveShellConfigFile(std.testing.io, .powershell, h.tmp_dir, &profile_buf).?;
+    const cmd = try std.fmt.allocPrint(h.arena.allocator(), ". '{s}'; prompt", .{profile_path});
 
-    const cmd = try std.fmt.allocPrint(alloc, ". '{s}'; prompt", .{profile_path});
-    const zap_dir = std.fs.path.dirname(h.zap_bin) orelse ".";
-
-    var child = if (builtin.os.tag == .windows) blk: {
-        var orig_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const orig_path = Harness.getEnvWindows("PATH", &orig_path_buf) orelse "";
-        const new_path = try std.fmt.allocPrint(alloc, "{s};{s}", .{ zap_dir, orig_path });
-        const xdg_dir = try std.fmt.allocPrint(alloc, "{s}\\.config", .{h.tmp_dir});
-
-        Harness.setEnvWindows("HOME", h.tmp_dir);
-        Harness.setEnvWindows("USERPROFILE", h.tmp_dir);
-        Harness.setEnvWindows("XDG_CONFIG_HOME", xdg_dir);
-        Harness.setEnvWindows("ZAP_CONFIG", null);
-        Harness.setEnvWindows("PATH", new_path);
-
-        break :blk std.process.spawn(std.testing.io, .{
-            .argv = &.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd },
-            .cwd = .{ .path = h.tmp_dir },
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .stdin = .ignore,
-        }) catch |err| switch (err) {
-            error.FileNotFound => return,
-            else => return err,
-        };
-    } else blk: {
-        const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
-        const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
-        const path_env = try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
-
-        const argv = [_][]const u8{
-            "env",
-            home_env,
-            xdg_env,
-            path_env,
-            "pwsh",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            cmd,
-        };
-
-        break :blk std.process.spawn(std.testing.io, .{
-            .argv = &argv,
-            .cwd = .{ .path = h.tmp_dir },
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .stdin = .ignore,
-        }) catch |err| switch (err) {
-            error.FileNotFound => return,
-            else => return err,
-        };
-    };
-
-    var stream_buf: [512]u8 = undefined;
-    var reader = child.stdout.?.reader(std.testing.io, &stream_buf);
-    var out_buf: [4096]u8 = undefined;
-    const n = try reader.interface.readSliceShort(&out_buf);
-    const term = try child.wait(std.testing.io);
-    if (term == .exited and term.exited == 127) return;
-
-    const pwsh_prompt_out = out_buf[0..n];
+    const pwsh_prompt_out = (try h.runShellScript(&.{
+        platform.powershell_bin,
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        cmd,
+    })) orelse return;
     try Harness.expectContains(pwsh_prompt_out, "pwsh-branch");
     try Harness.expectContains(pwsh_prompt_out, "❯");
 }

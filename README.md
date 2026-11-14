@@ -121,6 +121,13 @@ eval "$(zap init bash)"
 (&zap init powershell | Out-String) | Invoke-Expression
 ```
 
+### Command Prompt (cmd.exe via Clink)
+
+```bat
+:: %LOCALAPPDATA%\clink\zap.lua (or run: zap init cmd --install)
+load(io.popen('"zap" init cmd'):read('*a'))()
+```
+
 ---
 
 ## Configuration

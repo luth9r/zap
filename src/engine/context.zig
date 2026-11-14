@@ -34,4 +34,3 @@ pub fn resolveCwdPath(init: std.process.Init, buf: *[std.fs.max_path_bytes]u8) [
     const len = pwd_file.realPath(init.io, buf) catch return ".";
     return buf[0..len];
 }
-

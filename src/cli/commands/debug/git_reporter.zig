@@ -7,10 +7,7 @@ pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: Debug
     _ = init;
     const io = dctx.prompt.io orelse return;
 
-    var start_ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 0 };
-    if (@import("builtin").os.tag == .linux) {
-        _ = std.os.linux.clock_gettime(.MONOTONIC, &start_ts);
-    }
+    const start_ts = std.Io.Clock.awake.now(io);
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
@@ -48,17 +45,10 @@ pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: Debug
     var collector = git_utils.GitFileCollector{};
     git_utils.collectDetailedGitFiles(io, git_dir, repo_root, &collector);
 
-    const is_worktree = !std.mem.endsWith(u8, git_dir, "/.git") and !std.mem.eql(u8, git_dir, ".git");
+    const is_worktree = !std.mem.eql(u8, std.fs.path.basename(git_dir), ".git");
 
-    var elapsed_us: u64 = 0;
-    if (@import("builtin").os.tag == .linux) {
-        var end_ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 0 };
-        _ = std.os.linux.clock_gettime(.MONOTONIC, &end_ts);
-        const sec_diff = end_ts.sec - start_ts.sec;
-        const nsec_diff = end_ts.nsec - start_ts.nsec;
-        const total_ns = @as(u64, @intCast(@max(0, sec_diff * 1_000_000_000 + nsec_diff)));
-        elapsed_us = @divTrunc(total_ns, 1000);
-    }
+    const total_ns = start_ts.untilNow(io, .awake).toNanoseconds();
+    const elapsed_us: u64 = @intCast(@divTrunc(@max(0, total_ns), 1000));
 
     if (dctx.json) {
         try writer.print(

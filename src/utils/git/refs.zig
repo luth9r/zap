@@ -83,8 +83,8 @@ fn findTagForHash(
         while (iter.next(io) catch null) |entry| {
             if (entry.kind == .file) {
                 var file_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-                const file_path = std.fmt.bufPrint(&file_path_buf, "{s}/{s}", .{tags_path, entry.name}) catch continue;
-                
+                const file_path = std.fmt.bufPrint(&file_path_buf, "{s}/{s}", .{ tags_path, entry.name }) catch continue;
+
                 var sha_buf: [64]u8 = undefined;
                 if (fs.readSmallFile(io, file_path, &sha_buf)) |raw_sha| {
                     const sha = std.mem.trim(u8, raw_sha, " \t\r\n");
@@ -108,14 +108,14 @@ fn findTagForHash(
         var content_buf: [32768]u8 = undefined;
         const bytes = reader.interface.readSliceShort(&content_buf) catch 0;
         const packed_content = content_buf[0..bytes];
-        
+
         var lines = std.mem.splitScalar(u8, packed_content, '\n');
         var prev_line_tag: ?[]const u8 = null;
-        
+
         while (lines.next()) |line| {
             const trimmed = std.mem.trim(u8, line, " \r");
             if (trimmed.len == 0 or trimmed[0] == '#') continue;
-            
+
             if (trimmed[0] == '^') {
                 const peeled_sha = trimmed[1..];
                 if (std.mem.eql(u8, peeled_sha, target_sha)) {
@@ -132,7 +132,7 @@ fn findTagForHash(
                 var it = std.mem.splitScalar(u8, trimmed, ' ');
                 const sha = it.next() orelse continue;
                 const ref = it.next() orelse continue;
-                
+
                 if (std.mem.eql(u8, sha, target_sha)) {
                     if (std.mem.startsWith(u8, ref, "refs/tags/")) {
                         const tag_name = ref["refs/tags/".len..];
@@ -257,4 +257,3 @@ test "unit: hasStash detects stash existence" {
     // After creating stash log: hasStash is true
     try testing.expect(hasStash(io, tmp));
 }
-

@@ -1,8 +1,19 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const root = @import("root.zig");
 const platform = @import("../utils/platform.zig");
 const Shell = root.Shell;
+
+const BASH_RC_REL = ".bashrc";
+const ZSH_RC_REL = ".zshrc";
+const FISH_RC_REL = ".config" ++ platform.sep ++ "fish" ++ platform.sep ++ "config.fish";
+const PWSH_RC_REL = if (platform.is_windows)
+    "Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1"
+else
+    ".config/powershell/Microsoft.PowerShell_profile.ps1";
+const CMD_RC_REL = if (platform.is_windows)
+    "AppData\\Local\\clink\\zap.lua"
+else
+    ".config/clink/zap.lua";
 
 pub const InstallResult = struct {
     already_installed: bool = false,
@@ -18,18 +29,15 @@ pub fn resolveShellConfigFile(
     buf: *[std.fs.max_path_bytes]u8,
 ) ?[]const u8 {
     _ = io;
-    const sep = platform.sep;
-
-    return switch (shell) {
-        .bash => std.fmt.bufPrint(buf, "{s}{s}.bashrc", .{ home_dir, sep }) catch null,
-        .zsh => std.fmt.bufPrint(buf, "{s}{s}.zshrc", .{ home_dir, sep }) catch null,
-        .fish => std.fmt.bufPrint(buf, "{s}{s}.config{s}fish{s}config.fish", .{ home_dir, sep, sep, sep }) catch null,
-        .powershell => if (builtin.os.tag == .windows)
-            std.fmt.bufPrint(buf, "{s}\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1", .{home_dir}) catch null
-        else
-            std.fmt.bufPrint(buf, "{s}/.config/powershell/Microsoft.PowerShell_profile.ps1", .{home_dir}) catch null,
-        .generic => null,
+    const rel = switch (shell) {
+        .bash => BASH_RC_REL,
+        .zsh => ZSH_RC_REL,
+        .fish => FISH_RC_REL,
+        .powershell => PWSH_RC_REL,
+        .cmd => CMD_RC_REL,
+        .generic => return null,
     };
+    return platform.joinPath(buf, home_dir, rel);
 }
 
 /// Generates the one-line hook invocation for the given shell.
@@ -43,6 +51,7 @@ pub fn getHookSnippet(
         .zsh => std.fmt.bufPrint(buf, root.zsh.HOOK_TEMPLATE, .{exe_name}) catch null,
         .fish => std.fmt.bufPrint(buf, root.fish.HOOK_TEMPLATE, .{exe_name}) catch null,
         .powershell => std.fmt.bufPrint(buf, root.powershell.HOOK_TEMPLATE, .{exe_name}) catch null,
+        .cmd => std.fmt.bufPrint(buf, root.cmd.HOOK_TEMPLATE, .{exe_name}) catch null,
         .generic => null,
     };
 }
@@ -172,6 +181,9 @@ test "unit: resolveShellConfigFile for bash, zsh, fish, powershell" {
 
     const pwsh_cfg = resolveShellConfigFile(std.testing.io, .powershell, home, &buf).?;
     try std.testing.expect(std.mem.endsWith(u8, pwsh_cfg, "Microsoft.PowerShell_profile.ps1"));
+
+    const cmd_cfg = resolveShellConfigFile(std.testing.io, .cmd, home, &buf).?;
+    try std.testing.expect(std.mem.endsWith(u8, cmd_cfg, "zap.lua"));
 }
 
 test "unit: getHookSnippet for all shells" {
@@ -188,4 +200,10 @@ test "unit: getHookSnippet for all shells" {
 
     const pwsh_hook = getHookSnippet(.powershell, "zap", &buf).?;
     try std.testing.expectEqualStrings("Invoke-Expression (&zap init powershell | Out-String)", pwsh_hook);
+
+    const cmd_hook = getHookSnippet(.cmd, "zap", &buf).?;
+    try std.testing.expectEqualStrings(
+        "local h=io.popen('\"zap\" init cmd');if h then local s=h:read('*a');h:close();local f=load(s);if f then f() end end",
+        cmd_hook,
+    );
 }

@@ -54,7 +54,7 @@ pub fn formatDurationBuf(buf: []u8, duration_ms: u64, show_milliseconds: bool) ?
         if (s > 0) {
             return std.fmt.bufPrint(buf, "{d}m {d}s", .{ m, s }) catch null;
         } else {
-            return std.fmt.bufPrint(buf, "{d}m", .{ m }) catch null;
+            return std.fmt.bufPrint(buf, "{d}m", .{m}) catch null;
         }
     } else if (s > 0) {
         if (show_milliseconds and ms > 0) {
@@ -219,4 +219,3 @@ test "integration: cmd_duration disabled in config" {
     const out = try h.collect(.generic);
     try std.testing.expectEqual(@as(usize, 0), out.len);
 }
-

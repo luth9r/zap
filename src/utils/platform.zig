@@ -4,6 +4,9 @@ const builtin = @import("builtin");
 pub const is_windows = builtin.os.tag == .windows;
 pub const sep: []const u8 = std.fs.path.sep_str;
 pub const sep_char: u8 = std.fs.path.sep;
+pub const path_list_sep: []const u8 = if (is_windows) ";" else ":";
+pub const default_sys_path: []const u8 = if (is_windows) "C:\\Windows\\System32;C:\\Windows" else "/usr/bin:/bin:/usr/local/bin";
+pub const powershell_bin: []const u8 = if (is_windows) "powershell.exe" else "pwsh";
 pub const fs_root: []const u8 = if (is_windows) "C:\\" else "/";
 pub const exe_ext: []const u8 = if (is_windows) ".exe" else "";
 
@@ -11,6 +14,30 @@ pub const EnvEntry = struct {
     key: []const u8,
     value: ?[]const u8,
 };
+
+pub const env = struct {
+    pub const home = "HOME";
+    pub const userprofile = "USERPROFILE";
+    pub const pwd = "PWD";
+    pub const xdg_config_home = "XDG_CONFIG_HOME";
+    pub const appdata = "APPDATA";
+    pub const zap_config = "ZAP_CONFIG";
+    pub const path = "PATH";
+    pub const cmd_duration = "CMD_DURATION";
+    pub const zap_prompt = "ZAP_PROMPT";
+};
+
+pub fn readStreamToBuf(io: std.Io, file: std.Io.File, buf: []u8) usize {
+    var stream_buf: [512]u8 = undefined;
+    var reader = file.reader(io, &stream_buf);
+    var total: usize = 0;
+    while (total < buf.len) {
+        const n = reader.interface.readSliceShort(buf[total..]) catch break;
+        if (n == 0) break;
+        total += n;
+    }
+    return total;
+}
 
 pub fn isSep(c: u8) bool {
     return c == '/' or c == '\\';
@@ -52,6 +79,36 @@ pub fn joinPath(buf: []u8, base: []const u8, sub: []const u8) ?[]const u8 {
         return std.fmt.bufPrint(buf, "{s}{s}", .{ trimmed_base, trimmed_sub }) catch null;
     }
     return std.fmt.bufPrint(buf, "{s}{s}{s}", .{ trimmed_base, sep, trimmed_sub }) catch null;
+}
+
+pub fn joinParts(buf: []u8, parts: []const []const u8) ?[]const u8 {
+    if (parts.len == 0) return null;
+    if (parts[0].len > buf.len) return null;
+    @memcpy(buf[0..parts[0].len], parts[0]);
+    var pos: usize = parts[0].len;
+    var tmp: [std.fs.max_path_bytes]u8 = undefined;
+    for (parts[1..]) |part| {
+        if (pos > tmp.len) return null;
+        @memcpy(tmp[0..pos], buf[0..pos]);
+        const res = joinPath(buf, tmp[0..pos], part) orelse return null;
+        pos = res.len;
+    }
+    return buf[0..pos];
+}
+
+pub fn fileExistsAbsolute(io: std.Io, path: []const u8) bool {
+    const f = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
+    f.close(io);
+    return true;
+}
+
+pub fn buildPathWithPrependedDir(alloc: std.mem.Allocator, dir: []const u8) ![]const u8 {
+    if (is_windows) {
+        var orig_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const orig = getEnvWindows("PATH", &orig_buf) orelse default_sys_path;
+        return std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ dir, path_list_sep, orig });
+    }
+    return std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ dir, path_list_sep, default_sys_path });
 }
 
 /// Enables UTF-8 output and VT100 escapes on Windows consoles (no-op when piped).

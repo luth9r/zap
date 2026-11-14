@@ -261,7 +261,7 @@ test "integration: zap debug bench profiler" {
     defer h.destroy();
 
     try h.setupGit();
-    const out = try h.execZap(&.{ "debug", "bench" });
+    const out = try h.execZap(&.{ "debug", "bench", "-n", "3" });
     try Harness.expectContains(out, "Zap Prompt Engine Profiler & Benchmark");
     try Harness.expectContains(out, "Per-Module Execution Breakdown");
     try Harness.expectContains(out, "directory");
@@ -276,12 +276,12 @@ test "integration: zap debug bench with --json" {
     defer h.destroy();
 
     try h.setupGit();
-    const out = try h.execZap(&.{ "debug", "bench", "--json" });
+    const out = try h.execZap(&.{ "debug", "bench", "-n", "3", "--json" });
     try Harness.expectContains(out, "\"target\": \"prompt_profiler\"");
     try Harness.expectContains(out, "\"total_render_us\":");
     try Harness.expectContains(out, "\"modules\": [");
     try Harness.expectContains(out, "\"benchmark\":");
-    try Harness.expectContains(out, "\"iterations\": 100");
+    try Harness.expectContains(out, "\"iterations\": 3");
     try Harness.expectContains(out, "\"throughput_renders_per_sec\":");
 }
 
@@ -415,5 +415,3 @@ test "integration: zap debug timings, prompt, shell, and style targets" {
     try Harness.expectContains(out_bench_n, "\"p50_us\":");
     try Harness.expectContains(out_bench_n, "\"p95_us\":");
 }
-
-

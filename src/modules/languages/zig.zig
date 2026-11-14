@@ -154,5 +154,3 @@ test "integration: zig_lang in git worktree" {
 test "unit: zig_lang satisfies module contract" {
     comptime module.validateModule(ZigLangModule);
 }
-
-

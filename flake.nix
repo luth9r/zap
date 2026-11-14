@@ -44,6 +44,16 @@
             echo "󱐋 Running all Zap unit and integration tests..."
             exec ${pkgs.zig}/bin/zig build test --summary all
           '';
+
+          testUnit = pkgs.writeShellScriptBin "test-unit" ''
+            echo "󱐋 Running Zap unit tests..."
+            exec ${pkgs.zig}/bin/zig build test-unit --summary all
+          '';
+
+          testIntegration = pkgs.writeShellScriptBin "test-integration" ''
+            echo "󱐋 Running Zap integration tests..."
+            exec ${pkgs.zig}/bin/zig build test-integration --summary all
+          '';
         in
         {
           packages = rec {
@@ -85,6 +95,8 @@
             fish = flake-utils.lib.mkApp { drv = testFish; };
             pwsh = flake-utils.lib.mkApp { drv = testPwsh; };
             test = flake-utils.lib.mkApp { drv = testAll; };
+            test-unit = flake-utils.lib.mkApp { drv = testUnit; };
+            test-integration = flake-utils.lib.mkApp { drv = testIntegration; };
           };
 
           devShells.default = pkgs.mkShell {
@@ -97,6 +109,8 @@
               testFish
               testPwsh
               testAll
+              testUnit
+              testIntegration
             ] ++ (with pkgs; [
               zig
               bashInteractive
@@ -111,7 +125,7 @@
               export PATH="$PWD/zig-out/bin:$PATH"
               export ZAP_DEV=1
               echo "󱐋 Welcome to Zap development shell!"
-              echo "Quick test commands: test-bash, test-zsh, test-fish, test-pwsh, test-all"
+              echo "Quick test commands: test-bash, test-zsh, test-fish, test-pwsh, test-all, test-unit, test-integration"
             '';
           };
         }

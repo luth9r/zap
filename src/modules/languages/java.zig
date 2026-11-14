@@ -49,4 +49,3 @@ test "integration: java does not trigger on hidden .gradle directory" {
     const out = try h.collect(.generic);
     try std.testing.expectEqual(@as(usize, 0), out.len);
 }
-

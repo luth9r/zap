@@ -172,7 +172,6 @@ fn findMatchingParen(str: []const u8, start_idx: usize) ?usize {
     return null;
 }
 
-
 const root_allowed_modules = blk: {
     const decls = @typeInfo(registry).@"struct".decls;
     var list: [decls.len][]const u8 = undefined;
@@ -181,7 +180,6 @@ const root_allowed_modules = blk: {
     }
     break :blk list;
 };
-
 
 /// Validates TOML content directly on the stack with zero heap allocations.
 pub fn validateContent(
@@ -715,6 +713,3 @@ test "unit: validateContent validates inline tables and right_format" {
     try std.testing.expect(!res_err.isValid());
     try std.testing.expectEqual(@as(usize, 3), res_err.error_count);
 }
-
-
-

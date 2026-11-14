@@ -1244,7 +1244,7 @@ test "integration: git_status respects git info exclude rules" {
     try h.git(&.{ "commit", "-m", "init" });
 
     // Add rule to .git/info/exclude
-    try h.writeFile(".git/info/exclude", "secret.env\n*.local\n");
+    try h.writeFile(".git/info/exclude", "config.toml\nsecret.env\n*.local\n");
 
     // Create files that match .git/info/exclude
     try h.writeFile("secret.env", "KEY=123");
@@ -1286,6 +1286,3 @@ test "integration: git_status handles tracked symlinks without false modified st
     const out = try h.collect(.generic);
     try std.testing.expectEqual(@as(usize, 0), out.len);
 }
-
-
-

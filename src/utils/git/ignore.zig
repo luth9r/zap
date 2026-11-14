@@ -302,4 +302,3 @@ test "unit: GitIgnore matches directory-only rules with slashes against nested f
     try testing.expect(!gi.isIgnored("frontend/src/main.ts", false));
     try testing.expect(!gi.isIgnored("backend/dist/other.txt", false));
 }
-

@@ -9,15 +9,9 @@ const git_utils = @import("../../../utils/git_utils.zig");
 const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 const DebugContext = context.DebugContext;
 
-fn getTimestampNs() u64 {
-    if (@import("builtin").os.tag == .linux) {
-        var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 0 };
-        _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
-        const s = @as(u64, @intCast(@max(0, ts.sec)));
-        const ns = @as(u64, @intCast(@max(0, ts.nsec)));
-        return s * 1_000_000_000 + ns;
-    }
-    return 0;
+fn getTimestampNs(io: std.Io) u64 {
+    const ts = std.Io.Clock.awake.now(io);
+    return @intCast(@max(0, ts.toNanoseconds()));
 }
 
 fn writeBar(writer: anytype, percent: usize, comptime max_width: usize) !void {
@@ -101,9 +95,9 @@ fn runProfilerAndBenchmark(
     var resolved_ctx = dctx.prompt;
     var git_dur_ns: u64 = 0;
     if (should_check_git) {
-        const t0 = getTimestampNs();
+        const t0 = getTimestampNs(io);
         resolved_ctx.git_dir = git_utils.findGitDir(io, resolved_ctx.cwd, &git_dir_buf);
-        const t1 = getTimestampNs();
+        const t1 = getTimestampNs(io);
         git_dur_ns = if (t1 > t0) t1 - t0 else 0;
     }
 
@@ -118,7 +112,7 @@ fn runProfilerAndBenchmark(
     var vars: [decls.len]formatter.Variable(prompt_engine.ModuleVar) = undefined;
     var var_buffers: [decls.len][512]u8 = undefined;
 
-    const single_run_t0 = getTimestampNs();
+    const single_run_t0 = getTimestampNs(io);
 
     inline for (decls, 0..) |decl, i| {
         const mod = @field(registry, decl.name);
@@ -131,9 +125,9 @@ fn runProfilerAndBenchmark(
             if (!is_git_mod or resolved_ctx.git_dir != null) {
                 const mod_writer = BufferWriter.init(&var_buffers[i], &pos);
                 const mod_cfg = @field(config, decl.name);
-                const m_t0 = getTimestampNs();
+                const m_t0 = getTimestampNs(io);
                 try mod.render(mod_writer, mod_cfg, resolved_ctx);
-                const m_t1 = getTimestampNs();
+                const m_t1 = getTimestampNs(io);
                 mod_dur_ns = if (m_t1 > m_t0) m_t1 - m_t0 else 0;
             }
         }
@@ -157,14 +151,14 @@ fn runProfilerAndBenchmark(
     if (config.add_newline) {
         try prompt_writer.writeByte('\n');
     }
-    const fmt_t0 = getTimestampNs();
+    const fmt_t0 = getTimestampNs(io);
     try formatter.formatTemplateWriter(prompt_writer, config.format, formatter.FormatContext(prompt_engine.ModuleVar){
         .vars = &vars,
         .shell = resolved_ctx.shell,
     });
-    const fmt_t1 = getTimestampNs();
+    const fmt_t1 = getTimestampNs(io);
     const fmt_dur_ns = if (fmt_t1 > fmt_t0) fmt_t1 - fmt_t0 else 0;
-    const single_run_t1 = getTimestampNs();
+    const single_run_t1 = getTimestampNs(io);
     const single_run_total_ns = if (single_run_t1 > single_run_t0) single_run_t1 - single_run_t0 else 0;
 
     if (!run_bench) {
@@ -273,9 +267,9 @@ fn runProfilerAndBenchmark(
         var dummy_pos: usize = 0;
         const dummy_writer = BufferWriter.init(&dummy_buf, &dummy_pos);
 
-        const b_t0 = getTimestampNs();
+        const b_t0 = getTimestampNs(io);
         try prompt_engine.render(dummy_writer, config, resolved_ctx);
-        const b_t1 = getTimestampNs();
+        const b_t1 = getTimestampNs(io);
         const b_dur = if (b_t1 > b_t0) b_t1 - b_t0 else 0;
 
         iter_durations[bench_iter] = b_dur;

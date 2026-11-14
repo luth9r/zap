@@ -1,6 +1,11 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const config_mod = @import("config.zig");
+const platform = @import("../utils/platform.zig");
+
+const DOT_CONFIG_DIR = ".config";
+const CONFIG_DIR_NAME = "zap";
+const DEFAULT_CONFIG_FILE = "zap.toml";
+const CONFIG_CANDIDATES = [_][]const u8{ DEFAULT_CONFIG_FILE, "config.toml" };
 
 pub fn loadConfigFile(
     io: std.Io,
@@ -255,30 +260,43 @@ pub fn resolveConfigPathBuf(
     buf: *[std.fs.max_path_bytes]u8,
     lookup_env: anytype,
 ) ?[]const u8 {
-    // User-defined configuration path via environment variable
-    if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
+    if (lookupEnv(lookup_env, platform.env.zap_config)) |custom| {
         if (custom.len > 0) return custom;
     }
 
-    // XDG Base Directory Specification support ($XDG_CONFIG_HOME/zap/zap.toml)
-    if (lookupEnv(lookup_env, "XDG_CONFIG_HOME")) |xdg| {
-        return std.fmt.bufPrint(buf, "{s}/zap/zap.toml", .{xdg}) catch null;
+    if (lookupEnv(lookup_env, platform.env.xdg_config_home)) |xdg| {
+        return platform.joinParts(buf, &.{ xdg, CONFIG_DIR_NAME, DEFAULT_CONFIG_FILE });
     }
 
-    // Windows-specific configuration path support (%APPDATA%\zap\zap.toml)
-    if (builtin.os.tag == .windows) {
-        if (lookupEnv(lookup_env, "APPDATA")) |appdata| {
-            return std.fmt.bufPrint(buf, "{s}\\zap\\zap.toml", .{appdata}) catch null;
+    if (platform.is_windows) {
+        if (lookupEnv(lookup_env, platform.env.appdata)) |appdata| {
+            return platform.joinParts(buf, &.{ appdata, CONFIG_DIR_NAME, DEFAULT_CONFIG_FILE });
         }
     }
 
-    // Universal fallback (~/.config/zap/zap.toml)
-    const home = lookupEnv(lookup_env, "HOME") orelse lookupEnv(lookup_env, "USERPROFILE");
+    const home = lookupEnv(lookup_env, platform.env.home) orelse lookupEnv(lookup_env, platform.env.userprofile);
     if (home) |h| {
-        const sep = if (builtin.os.tag == .windows) "\\" else "/";
-        return std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}zap.toml", .{ h, sep, sep, sep }) catch null;
+        return platform.joinParts(buf, &.{ h, DOT_CONFIG_DIR, CONFIG_DIR_NAME, DEFAULT_CONFIG_FILE });
     }
 
+    return null;
+}
+
+fn firstExistingInParts(
+    io: std.Io,
+    buf: *[std.fs.max_path_bytes]u8,
+    prefix_parts: []const []const u8,
+) ?[]const u8 {
+    var parts_buf: [4][]const u8 = undefined;
+    if (prefix_parts.len + 1 > parts_buf.len) return null;
+    @memcpy(parts_buf[0..prefix_parts.len], prefix_parts);
+
+    for (CONFIG_CANDIDATES) |filename| {
+        parts_buf[prefix_parts.len] = filename;
+        if (platform.joinParts(buf, parts_buf[0 .. prefix_parts.len + 1])) |candidate| {
+            if (platform.fileExistsAbsolute(io, candidate)) return candidate;
+        }
+    }
     return null;
 }
 
@@ -287,50 +305,23 @@ pub fn resolveExistingConfigPath(
     buf: *[std.fs.max_path_bytes]u8,
     lookup_env: anytype,
 ) ?[]const u8 {
-    if (lookupEnv(lookup_env, "ZAP_CONFIG")) |custom| {
+    if (lookupEnv(lookup_env, platform.env.zap_config)) |custom| {
         if (custom.len > 0) return custom;
     }
 
-    const candidates = [_][]const u8{ "zap.toml", "config.toml" };
+    if (lookupEnv(lookup_env, platform.env.xdg_config_home)) |xdg| {
+        if (firstExistingInParts(io, buf, &.{ xdg, CONFIG_DIR_NAME })) |found| return found;
+    }
 
-    if (lookupEnv(lookup_env, "XDG_CONFIG_HOME")) |xdg| {
-        for (candidates) |filename| {
-            if (std.fmt.bufPrint(buf, "{s}/zap/{s}", .{ xdg, filename })) |candidate| {
-                if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
-                    var file = f;
-                    file.close(io);
-                    return candidate;
-                } else |_| {}
-            } else |_| {}
+    if (platform.is_windows) {
+        if (lookupEnv(lookup_env, platform.env.appdata)) |appdata| {
+            if (firstExistingInParts(io, buf, &.{ appdata, CONFIG_DIR_NAME })) |found| return found;
         }
     }
 
-    if (builtin.os.tag == .windows) {
-        if (lookupEnv(lookup_env, "APPDATA")) |appdata| {
-            for (candidates) |filename| {
-                if (std.fmt.bufPrint(buf, "{s}\\zap\\{s}", .{ appdata, filename })) |candidate| {
-                    if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
-                        var file = f;
-                        file.close(io);
-                        return candidate;
-                    } else |_| {}
-                } else |_| {}
-            }
-        }
-    }
-
-    const home = lookupEnv(lookup_env, "HOME") orelse lookupEnv(lookup_env, "USERPROFILE");
+    const home = lookupEnv(lookup_env, platform.env.home) orelse lookupEnv(lookup_env, platform.env.userprofile);
     if (home) |h| {
-        const sep = if (builtin.os.tag == .windows) "\\" else "/";
-        for (candidates) |filename| {
-            if (std.fmt.bufPrint(buf, "{s}{s}.config{s}zap{s}{s}", .{ h, sep, sep, sep, filename })) |candidate| {
-                if (std.Io.Dir.openFileAbsolute(io, candidate, .{})) |f| {
-                    var file = f;
-                    file.close(io);
-                    return candidate;
-                } else |_| {}
-            } else |_| {}
-        }
+        if (firstExistingInParts(io, buf, &.{ h, DOT_CONFIG_DIR, CONFIG_DIR_NAME })) |found| return found;
     }
 
     return resolveConfigPathBuf(buf, lookup_env);
@@ -499,7 +490,10 @@ test "unit: resolveConfigPathBuf resolves XDG_CONFIG_HOME" {
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = resolveConfigPathBuf(&buf, mockEnv).?;
-    try std.testing.expectEqualStrings("/home/test/.custom_config/zap/zap.toml", path);
+    try std.testing.expectEqualStrings(
+        "/home/test/.custom_config" ++ platform.sep ++ CONFIG_DIR_NAME ++ platform.sep ++ DEFAULT_CONFIG_FILE,
+        path,
+    );
 }
 
 test "unit: resolveConfigPathBuf falls back to HOME/.config/zap/zap.toml" {
@@ -512,10 +506,7 @@ test "unit: resolveConfigPathBuf falls back to HOME/.config/zap/zap.toml" {
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = resolveConfigPathBuf(&buf, mockEnv).?;
-    const expected = if (builtin.os.tag == .windows)
-        "/home/user\\.config\\zap\\zap.toml"
-    else
-        "/home/user/.config/zap/zap.toml";
+    const expected = "/home/user" ++ platform.sep ++ DOT_CONFIG_DIR ++ platform.sep ++ CONFIG_DIR_NAME ++ platform.sep ++ DEFAULT_CONFIG_FILE;
     try std.testing.expectEqualStrings(expected, path);
 }
 
@@ -578,4 +569,3 @@ test "unit: parse inline comments after values while preserving hashes in quotes
     try std.testing.expectEqual(@as(usize, 5), cfg.directory.truncation_length);
     try std.testing.expectEqualStrings("#89b4fa bold", cfg.directory.style);
 }
-

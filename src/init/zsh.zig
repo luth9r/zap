@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 
 pub const HOOK_TEMPLATE = "eval \"$({s} init zsh)\"";
 
@@ -111,48 +110,8 @@ test "integration: real zsh session with auto-installed zap hook and config" {
     const install_res = try h.execZapAllowFail(&.{ "init", "zsh", "--install" });
     try testing.expectEqual(@as(u8, 0), install_res.exit_code);
 
-    const alloc = h.arena.allocator();
-    const cmd = try std.fmt.allocPrint(alloc, "source \"{s}/.zshrc\"; _zap_precmd; echo -n \"$PROMPT\"", .{h.tmp_dir});
-
-    const home_env = try std.fmt.allocPrint(alloc, "HOME={s}", .{h.tmp_dir});
-    const xdg_env = try std.fmt.allocPrint(alloc, "XDG_CONFIG_HOME={s}/.config", .{h.tmp_dir});
-    const zap_dir = std.fs.path.dirname(h.zap_bin) orelse ".";
-    const path_env = if (builtin.os.tag == .windows)
-        try std.fmt.allocPrint(alloc, "PATH={s};C:\\Windows\\System32;C:\\Windows", .{zap_dir})
-    else
-        try std.fmt.allocPrint(alloc, "PATH={s}:/usr/bin:/bin:/usr/local/bin", .{zap_dir});
-
-    const argv = [_][]const u8{
-        "env",
-        home_env,
-        xdg_env,
-        path_env,
-        "zsh",
-        "-f",
-        "+Z",
-        "-c",
-        cmd,
-    };
-
-    var child = std.process.spawn(std.testing.io, .{
-        .argv = &argv,
-        .cwd = .{ .path = h.tmp_dir },
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .stdin = .ignore,
-    }) catch |err| switch (err) {
-        error.FileNotFound => return,
-        else => return err,
-    };
-
-    var stream_buf: [512]u8 = undefined;
-    var reader = child.stdout.?.reader(std.testing.io, &stream_buf);
-    var out_buf: [4096]u8 = undefined;
-    const n = try reader.interface.readSliceShort(&out_buf);
-    const term = try child.wait(std.testing.io);
-    if (term == .exited and term.exited == 127) return;
-
-    const zsh_prompt_out = out_buf[0..n];
+    const cmd = try std.fmt.allocPrint(h.arena.allocator(), "source \"{s}/.zshrc\"; _zap_precmd; echo -n \"$PROMPT\"", .{h.tmp_dir});
+    const zsh_prompt_out = (try h.runShellScript(&.{ "zsh", "-f", "+Z", "-c", cmd })) orelse return;
     try Harness.expectContains(zsh_prompt_out, "zsh-branch");
     try Harness.expectContains(zsh_prompt_out, "❯");
     try Harness.expectAnsi(zsh_prompt_out, .zsh);

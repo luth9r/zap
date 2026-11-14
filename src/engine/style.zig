@@ -485,6 +485,3 @@ test "unit: validate style strings" {
     try testing.expectEqualStrings("fg:299", Style.validate("fg:299").?); // out of range 256
     try testing.expectEqualStrings("#12345", Style.validate("#12345").?); // bad hex length
 }
-
-
-

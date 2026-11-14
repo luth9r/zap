@@ -324,4 +324,3 @@ test "integration: git_state custom labels and styled format" {
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "PICKING");
 }
-
