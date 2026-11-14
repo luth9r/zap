@@ -1,5 +1,6 @@
 const std = @import("std");
 const init_mod = @import("../../init/root.zig");
+const context = @import("../../engine/context.zig");
 const BufferWriter = @import("../../utils/buffer_writer.zig").BufferWriter;
 
 pub const Args = struct {
@@ -10,7 +11,7 @@ pub const Args = struct {
 
 pub fn execute(init: std.process.Init, init_args: Args) !void {
     if (init_args.install) {
-        const home_path = resolveHomePath(init);
+        const home_path = context.resolveHomePath(init);
         var out_buf: [4096]u8 = undefined;
         var pos: usize = 0;
         const writer = BufferWriter.init(&out_buf, &pos);
@@ -34,10 +35,6 @@ pub fn execute(init: std.process.Init, init_args: Args) !void {
         try init_mod.renderInitScript(writer, init_args.shell, init_args.exe_name);
         try std.Io.File.stdout().writeStreamingAll(init.io, script_buf[0..pos]);
     }
-}
-
-pub fn resolveHomePath(init: std.process.Init) []const u8 {
-    return init.environ_map.get("HOME") orelse init.environ_map.get("USERPROFILE") orelse ".";
 }
 
 const testing = std.testing;

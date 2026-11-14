@@ -96,45 +96,6 @@ pub const GitFileCollector = struct {
     }
 };
 
-fn readExact(reader: anytype, dest: []u8) bool {
-    var total: usize = 0;
-    while (total < dest.len) {
-        const n = reader.interface.readSliceShort(dest[total..]) catch return false;
-        if (n == 0) return false;
-        total += n;
-    }
-    return true;
-}
-
-fn readByte(reader: anytype) ?u8 {
-    var b: [1]u8 = undefined;
-    const n = reader.interface.readSliceShort(&b) catch return null;
-    if (n == 0) return null;
-    return b[0];
-}
-
-fn readEntryName(reader: anytype, name_buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
-    var name_len: usize = 0;
-    while (name_len < name_buf.len) {
-        const b = readByte(reader) orelse return null;
-        if (b == 0) break;
-        name_buf[name_len] = b;
-        name_len += 1;
-    }
-    return name_buf[0..name_len];
-}
-
-fn skipEntryPadding(reader: anytype, header_len: usize, name_len: usize) bool {
-    const raw_len = header_len + name_len + 1;
-    const aligned_len = (raw_len + 7) & ~@as(usize, 7);
-    const pad_needed = aligned_len - raw_len;
-    if (pad_needed > 0) {
-        var pad_buf: [8]u8 = undefined;
-        return readExact(reader, pad_buf[0..pad_needed]);
-    }
-    return true;
-}
-
 /// Collects detailed lists of modified, deleted, conflicted, and untracked files
 pub fn collectDetailedGitFiles(
     io: std.Io,
@@ -152,7 +113,7 @@ pub fn collectDetailedGitFiles(
     var reader = file.reader(io, &stream_buf);
 
     var header_buf: [12]u8 = undefined;
-    if (!readExact(&reader, &header_buf)) return;
+    if (!index.readExact(&reader, &header_buf)) return;
     if (!std.mem.eql(u8, header_buf[0..4], "DIRC")) return;
 
     const version = std.mem.readInt(u32, header_buf[4..8][0..4], .big);
@@ -173,7 +134,7 @@ pub fn collectDetailedGitFiles(
     var i: u32 = 0;
     while (i < entry_count) : (i += 1) {
         var entry_fixed: [62]u8 = undefined;
-        if (!readExact(&reader, &entry_fixed)) break;
+        if (!index.readExact(&reader, &entry_fixed)) break;
 
         const mtime_s = std.mem.readInt(u32, entry_fixed[8..12][0..4], .big);
         const mtime_ns = std.mem.readInt(u32, entry_fixed[12..16][0..4], .big);
@@ -188,11 +149,11 @@ pub fn collectDetailedGitFiles(
         if (is_extended) {
             header_len = 64;
             var ext_extra: [2]u8 = undefined;
-            if (!readExact(&reader, &ext_extra)) break;
+            if (!index.readExact(&reader, &ext_extra)) break;
         }
 
         var name_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const entry_name = readEntryName(&reader, &name_buf) orelse break;
+        const entry_name = index.readEntryName(&reader, &name_buf) orelse break;
 
         if (stage > 0) {
             collector.addConflicted(entry_name);
@@ -223,7 +184,7 @@ pub fn collectDetailedGitFiles(
             }
         }
 
-        if (!skipEntryPadding(&reader, header_len, entry_name.len)) break;
+        if (!index.skipEntryPadding(&reader, header_len, entry_name.len)) break;
     }
 
     // Collect untracked files

@@ -39,7 +39,14 @@ description: >-
    - Use `h.runShellScript(...)` for shell session tests instead of duplicating `PATH`/`HOME`/`spawn` boilerplate.
    - `Harness.setupGit()` clones a cached `--allow-empty` template repo (with `config.toml` in `.git/info/exclude`). Any test that overwrites `.git/info/exclude` MUST keep `config.toml` in it.
    - Keep `test "internal: cleanup git template"` in `harness.zig` — `src/tests/runner.zig` runs it in `defer` per worker.
-3. **Zig 0.16 idioms:**
+3. **Reuse Existing Helpers (No Duplicate Functions):**
+   - Before writing a new utility function, check if it already exists in the canonical module:
+     - **OS / Env / Paths / Streams / Time:** `src/utils/platform.zig` (`env.*`, `joinPath`, `joinParts`, `readStreamToBuf`, `spawnWithEnv`, `getLocalTime`, `fileExistsAbsolute`).
+     - **Home / CWD Resolution:** `src/engine/context.zig` (`resolveHomePath`, `resolveCwdPath`) — never redefine `resolveHomePath` in CLI commands.
+     - **Git Index Binary Readers:** `src/utils/git/index.zig` (`readExact`, `readByte`, `readEntryName`, `skipEntryPadding`).
+     - **ANSI Stripping & Test Assertions:** `src/tests/fixture.zig` (`Fixture.stripAnsi`) and `src/tests/assertions.zig`.
+   - Always run `zig fmt --check src/ build.zig` (or `zig fmt src/ build.zig`) to keep Unix `LF` formatting.
+4. **Zig 0.16 idioms:**
    - Use `@splat(null)` instead of `.{null} ** N` for array initialization to avoid false ZLS diagnostics.
    - Use `std.Io.Dir` / `std.Io.File` APIs (`openDir`, `copyFile`, `createDirPathOpen`, `deleteTree`).
    - Watch for CRLF files on Windows if string-matching edits fail.

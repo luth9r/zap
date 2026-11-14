@@ -6,6 +6,7 @@ pub const git_status = @import("core/git/git_status.zig");
 pub const cmd_duration = @import("core/cmd_duration.zig");
 pub const character = @import("core/character.zig");
 pub const os = @import("core/os.zig");
+pub const time = @import("core/time.zig");
 pub const zig_lang = @import("languages/zig.zig");
 pub const python = @import("languages/python.zig");
 pub const golang = @import("languages/golang.zig");

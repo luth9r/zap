@@ -20,7 +20,7 @@ pub const TrackedProbe = struct {
 };
 
 /// Helper to read an exact slice of bytes from a streaming reader.
-fn readExact(reader: anytype, dest: []u8) bool {
+pub fn readExact(reader: anytype, dest: []u8) bool {
     var total: usize = 0;
     while (total < dest.len) {
         const n = reader.interface.readSliceShort(dest[total..]) catch return false;
@@ -31,7 +31,7 @@ fn readExact(reader: anytype, dest: []u8) bool {
 }
 
 /// Helper to read a single byte from a streaming reader.
-fn readByte(reader: anytype) ?u8 {
+pub fn readByte(reader: anytype) ?u8 {
     var b: [1]u8 = undefined;
     const n = reader.interface.readSliceShort(&b) catch return null;
     if (n == 0) return null;
@@ -39,7 +39,7 @@ fn readByte(reader: anytype) ?u8 {
 }
 
 /// Reads a null-terminated file path from the index stream into a stack buffer.
-fn readEntryName(reader: anytype, name_buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
+pub fn readEntryName(reader: anytype, name_buf: *[std.fs.max_path_bytes]u8) ?[]const u8 {
     var name_len: usize = 0;
     while (name_len < name_buf.len) {
         const b = readByte(reader) orelse return null;
@@ -55,7 +55,7 @@ fn readEntryName(reader: anytype, name_buf: *[std.fs.max_path_bytes]u8) ?[]const
 /// Git Index Format: Each entry is padded with 1-8 NUL bytes to align the
 /// entire entry (header + name + NUL + padding) to an 8-byte offset boundary.
 /// Formula: aligned_len = (raw_len + 7) & ~7
-fn skipEntryPadding(reader: anytype, header_len: usize, name_len: usize) bool {
+pub fn skipEntryPadding(reader: anytype, header_len: usize, name_len: usize) bool {
     const raw_len = header_len + name_len + 1; // header + name + 1 NUL terminator
     const aligned_len = (raw_len + 7) & ~@as(usize, 7); // Round up to next multiple of 8
     const pad_needed = aligned_len - raw_len;

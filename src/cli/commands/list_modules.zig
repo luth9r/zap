@@ -50,6 +50,7 @@ fn getModuleDescription(comptime name: []const u8) []const u8 {
     if (std.mem.eql(u8, name, "cmd_duration")) return "Execution duration of previous command";
     if (std.mem.eql(u8, name, "character")) return "Prompt status character";
     if (std.mem.eql(u8, name, "os")) return "Operating system indicator symbol";
+    if (std.mem.eql(u8, name, "time")) return "Current local time";
     if (std.mem.eql(u8, name, "zig_lang")) return "Zig compiler toolchain and project indicator";
     if (std.mem.eql(u8, name, "python")) return "Python virtual environment and project indicator";
     if (std.mem.eql(u8, name, "golang")) return "Go module and workspace indicator";

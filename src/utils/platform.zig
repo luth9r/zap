@@ -251,6 +251,47 @@ pub fn createSymlink(io: std.Io, target: []const u8, link_path: []const u8) bool
     return term == .exited and term.exited == 0;
 }
 
+pub const LocalTime = struct {
+    hour: u8,
+    minute: u8,
+    second: u8,
+};
+
+pub fn getLocalTime(io: std.Io) LocalTime {
+    if (is_windows) {
+        const SystemTime = extern struct {
+            year: u16,
+            month: u16,
+            day_of_week: u16,
+            day: u16,
+            hour: u16,
+            minute: u16,
+            second: u16,
+            milliseconds: u16,
+        };
+        const kernel32 = struct {
+            const WINAPI: std.builtin.CallingConvention = if (builtin.cpu.arch == .x86) .stdcall else .c;
+            extern "kernel32" fn GetLocalTime(lpSystemTime: *SystemTime) callconv(WINAPI) void;
+        };
+        var st: SystemTime = undefined;
+        kernel32.GetLocalTime(&st);
+        return .{
+            .hour = @intCast(@min(st.hour, 23)),
+            .minute = @intCast(@min(st.minute, 59)),
+            .second = @intCast(@min(st.second, 59)),
+        };
+    }
+
+    const now_ns = std.Io.Clock.real.now(io).toNanoseconds();
+    const epoch_s: i64 = @intCast(@divFloor(now_ns, std.time.ns_per_s));
+    const day_s: u64 = @intCast(@mod(epoch_s, 86400));
+    return .{
+        .hour = @intCast(day_s / 3600),
+        .minute = @intCast((day_s % 3600) / 60),
+        .second = @intCast(day_s % 60),
+    };
+}
+
 pub fn setDirReadOnly(io: std.Io, dir_path: []const u8) bool {
     if (is_windows) return false;
     var child = std.process.spawn(io, .{
