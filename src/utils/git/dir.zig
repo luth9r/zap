@@ -127,6 +127,13 @@ pub fn gitDirToRepoRoot(git_dir: []const u8) []const u8 {
     return std.fs.path.dirname(git_dir) orelse git_dir;
 }
 
+fn containsAnyMarker(haystack: []const u8, markers: []const []const u8) bool {
+    for (markers) |marker| {
+        if (std.mem.indexOf(u8, haystack, marker) != null) return true;
+    }
+    return false;
+}
+
 /// Resolves the active working tree root for a repository, linked worktree, or submodule.
 pub fn resolveRepoRoot(
     io: std.Io,
@@ -134,37 +141,14 @@ pub fn resolveRepoRoot(
     git_dir: []const u8,
     out_buf: *[std.fs.max_path_bytes]u8,
 ) []const u8 {
-    for (worktree_markers) |marker| {
-        if (std.mem.indexOf(u8, git_dir, marker) != null) {
-            var gitdir_file_buf: [std.fs.max_path_bytes]u8 = undefined;
-            if (platform.joinPath(&gitdir_file_buf, git_dir, "gitdir")) |gitdir_file| {
-                if (fs.readSmallFile(io, gitdir_file, out_buf)) |dot_git_path| {
-                    if (std.fs.path.isAbsolute(dot_git_path)) {
-                        if (std.fs.path.dirname(dot_git_path)) |wt_root| {
-                            return wt_root;
-                        }
-                    }
-                }
-            }
-            if (cwd.len > 0) {
-                if (findRepoRoot(io, cwd, out_buf)) |wt_root| return wt_root;
-            }
-            break;
-        }
-    }
-
-    for (module_markers) |marker| {
-        if (std.mem.indexOf(u8, git_dir, marker) != null) {
-            if (cwd.len > 0) {
-                if (findRepoRoot(io, cwd, out_buf)) |sub_root| return sub_root;
-            }
-            break;
-        }
-    }
-
     const static_root = gitDirToRepoRoot(git_dir);
-    if (cwd.len > 0 and !platform.pathIsSubpath(cwd, static_root)) {
-        if (findRepoRoot(io, cwd, out_buf)) |found_root| return found_root;
+    if (cwd.len > 0) {
+        if (containsAnyMarker(git_dir, &worktree_markers) or
+            containsAnyMarker(git_dir, &module_markers) or
+            !platform.pathIsSubpath(cwd, static_root))
+        {
+            if (findRepoRoot(io, cwd, out_buf)) |found_root| return found_root;
+        }
     }
     return static_root;
 }

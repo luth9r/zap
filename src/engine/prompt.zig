@@ -447,8 +447,8 @@ test "integration: prompt render latency under 1ms in real git repo" {
     const in_proc_total_ns = in_proc_start.untilNow(io, .awake).toNanoseconds();
     const avg_in_proc_ns = @divTrunc(in_proc_total_ns, in_proc_iters);
 
-    // Render with git status subprocess must complete well within interactive prompt budget (15ms on Unix, 50ms on Windows)
-    const max_ns: i96 = 30_000_000;
+    // Render with git status subprocess must complete well within interactive prompt budget (30ms on Unix, 150ms on Windows CI)
+    const max_ns: i96 = if (builtin.os.tag == .windows) 150_000_000 else 30_000_000;
     try testing.expect(avg_in_proc_ns < max_ns);
 }
 
