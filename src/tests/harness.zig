@@ -156,6 +156,7 @@ pub const Harness = struct {
         try self.run(&.{ "git", "init", "--initial-branch=master", tpl_path });
         try self.run(&.{ "git", "-C", tpl_path, "config", "user.email", "test@zap.dev" });
         try self.run(&.{ "git", "-C", tpl_path, "config", "user.name", "Zap Test" });
+        try self.run(&.{ "git", "-C", tpl_path, "config", "gc.auto", "0" });
 
         var exclude_buf: [std.fs.max_path_bytes]u8 = undefined;
         const exclude_path = platform.joinPath(&exclude_buf, tpl_path, ".git/info/exclude") orelse return error.NameTooLong;
