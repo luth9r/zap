@@ -16,7 +16,9 @@ pub const render = DotnetModule.render;
 pub const buffer_size = DotnetModule.buffer_size;
 pub const debug = DotnetModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = DotnetModule.detect;
+pub const module_name = DotnetModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: dotnet satisfies module contract" {
     comptime module.validateModule(DotnetModule);

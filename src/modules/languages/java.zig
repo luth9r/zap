@@ -16,7 +16,9 @@ pub const render = JavaModule.render;
 pub const buffer_size = JavaModule.buffer_size;
 pub const debug = JavaModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = JavaModule.detect;
+pub const module_name = JavaModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: java satisfies module contract" {
     comptime module.validateModule(JavaModule);

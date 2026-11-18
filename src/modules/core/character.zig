@@ -65,7 +65,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     }
 }
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: character default success exit code" {
     var h = try Harness.create(std.testing.allocator);

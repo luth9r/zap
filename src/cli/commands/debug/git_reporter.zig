@@ -1,7 +1,43 @@
 const std = @import("std");
 const context = @import("../../../engine/context.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 const DebugContext = context.DebugContext;
+
+fn writeJsonFileList(
+    writer: anytype,
+    collector: *const git_utils.GitFileCollector,
+    list: *const git_utils.GitFileCollector.PathList,
+) !void {
+    var idx: usize = 0;
+    while (idx < list.count) : (idx += 1) {
+        if (idx > 0) try writer.writeAll(", ");
+        const offset = list.offsets[idx];
+        const slice = collector.storage[offset .. offset + list.lens[idx]];
+        try writer.writeByte('"');
+        try parse_utils.writeJsonEscaped(writer, slice);
+        try writer.writeByte('"');
+    }
+}
+
+fn writeTextFileList(
+    writer: anytype,
+    header: []const u8,
+    collector: *const git_utils.GitFileCollector,
+    list: *const git_utils.GitFileCollector.PathList,
+) !void {
+    try writer.print("\n{s}:\n", .{header});
+    if (list.count == 0) {
+        try writer.writeAll("  (none)\n");
+    } else {
+        var idx: usize = 0;
+        while (idx < list.count) : (idx += 1) {
+            const offset = list.offsets[idx];
+            const slice = collector.storage[offset .. offset + list.lens[idx]];
+            try writer.print("  - {s}\n", .{slice});
+        }
+    }
+}
 
 pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
     _ = init;
@@ -22,28 +58,24 @@ pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: Debug
     }
 
     const git_dir = git_dir_opt.?;
-    const repo_root = git_utils.gitDirToRepoRoot(git_dir);
+    var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const repo_root = git_utils.resolveRepoRoot(io, dctx.prompt.cwd, git_dir, &repo_root_buf);
 
-    var branch_buf: [512]u8 = undefined;
-    const branch_opt = git_utils.getGitBranchFromDir(io, git_dir, &branch_buf);
+    var collector = git_utils.GitFileCollector{};
+    const status = git_utils.collectDetailedGitFiles(io, git_dir, repo_root, &collector);
+
+    var branch_buf: [256]u8 = undefined;
+    const branch_opt = git_utils.resolveBranch(io, dctx.prompt.cwd, git_dir, &status, &branch_buf);
     const branch_name = branch_opt orelse "DETACHED HEAD";
 
-    var head_buf: [512]u8 = undefined;
-    var ref_buf: [512]u8 = undefined;
-    const commit_info = git_utils.getGitCommit(io, git_dir, &head_buf, &ref_buf);
-    var ab = git_utils.git.ahead_behind.AheadBehindResult{};
-    if (branch_opt) |b| {
-        ab = git_utils.getAheadBehind(io, git_dir, b);
-    }
-    const status = git_utils.getGitStatusForDir(io, dctx.prompt.cwd, git_dir, branch_opt);
-    const index_scan = git_utils.scanGitIndex(io, git_dir, repo_root);
+    var oid_buf: [64]u8 = undefined;
+    var tag_buf: [128]u8 = undefined;
+    const commit_info = git_utils.resolveCommit(io, dctx.prompt.cwd, git_dir, &status, true, false, &oid_buf, &tag_buf);
+    const index_entry_count = git_utils.getIndexEntryCount(io, git_dir);
 
     var cur_buf: [32]u8 = undefined;
     var total_buf: [32]u8 = undefined;
     const git_state = git_utils.getGitState(io, git_dir, &cur_buf, &total_buf);
-
-    var collector = git_utils.GitFileCollector{};
-    git_utils.collectDetailedGitFiles(io, git_dir, repo_root, &collector);
 
     const is_worktree = !std.mem.eql(u8, std.fs.path.basename(git_dir), ".git");
 
@@ -51,50 +83,41 @@ pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: Debug
     const elapsed_us: u64 = @intCast(@divTrunc(@max(0, total_ns), 1000));
 
     if (dctx.json) {
+        var j_root: [std.fs.max_path_bytes]u8 = undefined;
+        var j_gd: [std.fs.max_path_bytes]u8 = undefined;
+        var j_br: [512]u8 = undefined;
+        var j_tag: [256]u8 = undefined;
         try writer.print(
-            \\{{ "module": "git", "verbose": true, "in_git_repo": true, "repo_root": "{s}", "git_dir": "{s}", "is_worktree": {}, "branch": "{s}", "commit": "{s}", "tag": "{s}", "detached": {}, "ahead": {d}, "behind": {d}, "index_entries": {d}, "status": {{ "staged": {}, "modified": {}, "untracked": {}, "deleted": {}, "stashed": {}, "conflicted": {} }}, "files": {{ "modified": [
+            \\{{ "module": "git", "verbose": true, "in_git_repo": true, "repo_root": "{s}", "git_dir": "{s}", "is_worktree": {}, "branch": "{s}", "commit": "{s}", "tag": "{s}", "detached": {}, "ahead": {d}, "behind": {d}, "index_entries": {d}, "status": {{ "staged": {}, "modified": {}, "untracked": {}, "deleted": {}, "renamed": {}, "stashed": {}, "conflicted": {} }}, "files": {{ "modified": [
         , .{
-            repo_root,
-            git_dir,
+            parse_utils.escapeJsonBuf(&j_root, repo_root),
+            parse_utils.escapeJsonBuf(&j_gd, git_dir),
             is_worktree,
-            branch_name,
+            parse_utils.escapeJsonBuf(&j_br, branch_name),
             if (commit_info) |c| c.hash else "",
-            if (commit_info) |c| c.tag else "",
+            if (commit_info) |c| parse_utils.escapeJsonBuf(&j_tag, c.tag) else "",
             if (commit_info) |c| c.is_detached else false,
-            ab.ahead,
-            ab.behind,
-            index_scan.entry_count,
+            status.ahead,
+            status.behind,
+            index_entry_count,
             status.staged,
             status.modified,
             status.untracked,
             status.deleted,
+            status.renamed,
             status.stashed,
             status.conflicted,
         });
 
-        var m_idx: usize = 0;
-        while (m_idx < collector.modified_count) : (m_idx += 1) {
-            if (m_idx > 0) try writer.writeAll(", ");
-            try writer.print("\"{s}\"", .{collector.getModified(m_idx)});
-        }
+        try writeJsonFileList(writer, &collector, &collector.modified);
         try writer.writeAll("], \"untracked\": [");
-        var u_idx: usize = 0;
-        while (u_idx < collector.untracked_count) : (u_idx += 1) {
-            if (u_idx > 0) try writer.writeAll(", ");
-            try writer.print("\"{s}\"", .{collector.getUntracked(u_idx)});
-        }
+        try writeJsonFileList(writer, &collector, &collector.untracked);
         try writer.writeAll("], \"deleted\": [");
-        var d_idx: usize = 0;
-        while (d_idx < collector.deleted_count) : (d_idx += 1) {
-            if (d_idx > 0) try writer.writeAll(", ");
-            try writer.print("\"{s}\"", .{collector.getDeleted(d_idx)});
-        }
+        try writeJsonFileList(writer, &collector, &collector.deleted);
+        try writer.writeAll("], \"renamed\": [");
+        try writeJsonFileList(writer, &collector, &collector.renamed);
         try writer.writeAll("], \"conflicted\": [");
-        var c_idx: usize = 0;
-        while (c_idx < collector.conflicted_count) : (c_idx += 1) {
-            if (c_idx > 0) try writer.writeAll(", ");
-            try writer.print("\"{s}\"", .{collector.getConflicted(c_idx)});
-        }
+        try writeJsonFileList(writer, &collector, &collector.conflicted);
         try writer.print(
             \\ ] }}, "state": "{s}", "scan_duration_us": {d} }}
             \\
@@ -123,76 +146,45 @@ pub fn printGitVerboseDebug(init: std.process.Init, writer: anytype, dctx: Debug
             \\  Behind (⇣):       {d} commits
             \\
             \\Status Flags:
-            \\  Staged (+):       {}
+            \\  Staged (+):       {} ({d} files)
             \\  Modified (!):     {} ({d} files)
             \\  Untracked (?):    {} ({d} files)
             \\  Deleted (✘):      {} ({d} files)
+            \\  Renamed (»):      {} ({d} files)
             \\  Stashed ($):      {}
             \\  Conflicted (=):   {} ({d} files)
-            \\
-            \\Modified Files (!):
             \\
         , .{
             repo_root,
             git_dir,
             if (is_worktree) "Yes (linked worktree)" else "No (standard repository)",
-            index_scan.entry_count,
+            index_entry_count,
             branch_name,
             if (commit_info) |c| c.hash else "none",
             if (commit_info) |c| (if (c.tag.len > 0) c.tag else "none") else "none",
             if (commit_info) |c| c.is_detached else false,
-            ab.ahead,
-            ab.behind,
+            status.ahead,
+            status.behind,
             status.staged,
+            collector.staged_count,
             status.modified,
             collector.modified_count,
             status.untracked,
             collector.untracked_count,
             status.deleted,
             collector.deleted_count,
+            status.renamed,
+            collector.renamed_count,
             status.stashed,
             status.conflicted,
             collector.conflicted_count,
         });
 
-        if (collector.modified_count == 0) {
-            try writer.writeAll("  (none)\n");
-        } else {
-            var i: usize = 0;
-            while (i < collector.modified_count) : (i += 1) {
-                try writer.print("  - {s}\n", .{collector.getModified(i)});
-            }
-        }
-
-        try writer.writeAll("\nUntracked Files (?):\n");
-        if (collector.untracked_count == 0) {
-            try writer.writeAll("  (none)\n");
-        } else {
-            var i: usize = 0;
-            while (i < collector.untracked_count) : (i += 1) {
-                try writer.print("  - {s}\n", .{collector.getUntracked(i)});
-            }
-        }
-
-        try writer.writeAll("\nDeleted Files (✘):\n");
-        if (collector.deleted_count == 0) {
-            try writer.writeAll("  (none)\n");
-        } else {
-            var i: usize = 0;
-            while (i < collector.deleted_count) : (i += 1) {
-                try writer.print("  - {s}\n", .{collector.getDeleted(i)});
-            }
-        }
-
-        try writer.writeAll("\nConflicted Files (=):\n");
-        if (collector.conflicted_count == 0) {
-            try writer.writeAll("  (none)\n");
-        } else {
-            var i: usize = 0;
-            while (i < collector.conflicted_count) : (i += 1) {
-                try writer.print("  - {s}\n", .{collector.getConflicted(i)});
-            }
-        }
+        try writeTextFileList(writer, "Modified Files (!)", &collector, &collector.modified);
+        try writeTextFileList(writer, "Untracked Files (?)", &collector, &collector.untracked);
+        try writeTextFileList(writer, "Deleted Files (✘)", &collector, &collector.deleted);
+        try writeTextFileList(writer, "Renamed Files (»)", &collector, &collector.renamed);
+        try writeTextFileList(writer, "Conflicted Files (=)", &collector, &collector.conflicted);
 
         try writer.print(
             \\

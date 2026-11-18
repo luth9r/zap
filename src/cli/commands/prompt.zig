@@ -20,21 +20,7 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
     var config_file_buf: [64 * 1024]u8 = undefined;
 
     if (prompt_args.config_path) |custom_path| {
-        const file_res = if (std.fs.path.isAbsolute(custom_path))
-            std.Io.Dir.openFileAbsolute(init.io, custom_path, .{})
-        else
-            std.Io.Dir.cwd().openFile(init.io, custom_path, .{});
-
-        if (file_res) |f| {
-            var file = f;
-            defer file.close(init.io);
-            var stream_buf: [4096]u8 = undefined;
-            var reader = file.reader(init.io, &stream_buf);
-            const bytes_read = reader.interface.readSliceShort(&config_file_buf) catch 0;
-            if (bytes_read > 0) {
-                toml_parser.parseToml(&config, config_file_buf[0..bytes_read]);
-            }
-        } else |_| {}
+        _ = toml_parser.loadConfigFromPath(init.io, custom_path, &config, &config_file_buf);
     } else {
         toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
     }
@@ -47,9 +33,9 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
         config.add_newline = false;
     }
 
-    const home_path = resolveHomePath(init);
+    const home_path = context.resolveHomePath(init);
     var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_path = resolveCwdPath(init, &cwd_buf);
+    const cwd_path = context.resolveCwdPath(init, &cwd_buf);
 
     var prompt_buf: [4096]u8 = undefined;
     var pos: usize = 0;
@@ -66,9 +52,6 @@ pub fn execute(init: std.process.Init, prompt_args: Args) !void {
 
     try std.Io.File.stdout().writeStreamingAll(init.io, prompt_buf[0..pos]);
 }
-
-pub const resolveHomePath = context.resolveHomePath;
-pub const resolveCwdPath = context.resolveCwdPath;
 
 const testing = std.testing;
 const Harness = @import("../../tests/harness.zig").Harness;

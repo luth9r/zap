@@ -4,13 +4,13 @@ const builtin = @import("builtin");
 const formatter = @import("../../engine/formatter.zig");
 const fs = @import("../../utils/fs.zig");
 
-pub const Fixture = @import("../../tests/fixture.zig").Fixture;
+const Fixture = @import("../../tests/fixture.zig").Fixture;
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../engine/context.zig").DebugContext;
 pub const Shell = @import("../../init/root.zig").Shell;
-pub const Harness = @import("../../tests/harness.zig").Harness;
+const Harness = @import("../../tests/harness.zig").Harness;
 
-pub const Var = enum { style, symbol };
+pub const Var = enum { symbol };
 
 pub const OsConfig = struct {
     format: []const u8 = "[$symbol]($style) ",
@@ -84,10 +84,26 @@ pub const TargetOs = enum {
         };
     }
 
+    const distro_alias_map = std.StaticStringMapWithEql(TargetOs, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+        .{ "linuxmint", .mint },
+        .{ "rhel", .redhat },
+        .{ "redhatenterpriselinux", .redhat },
+        .{ "opensuse-leap", .opensuse },
+        .{ "opensuse-tumbleweed", .opensuse },
+        .{ "opensuse-microos", .opensuse },
+        .{ "popos", .pop },
+        .{ "pop_os", .pop },
+        .{ "archlinux", .arch },
+        .{ "elementaryos", .elementary },
+        .{ "rockylinux", .rocky },
+        .{ "voidlinux", .void },
+    });
+
     pub fn fromDistroId(raw_id: []const u8) TargetOs {
-        var id = raw_id;
-        if (id.len >= 2 and ((id[0] == '"' and id[id.len - 1] == '"') or (id[0] == '\'' and id[id.len - 1] == '\''))) {
-            id = id[1 .. id.len - 1];
+        const id = @import("../../config/toml_parser.zig").unquoteRaw(raw_id);
+
+        if (distro_alias_map.get(id)) |aliased| {
+            return aliased;
         }
 
         inline for (@typeInfo(TargetOs).@"enum".fields) |field| {
@@ -148,7 +164,6 @@ pub fn render(
         .shell = ctx.shell,
         .vars = &.{
             .{ .name = .symbol, .value = symbol },
-            .{ .name = .style, .value = config.style },
         },
     });
 }
@@ -176,9 +191,14 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
 
 test "unit: fromDistroId resolves common distros" {
     try testing.expectEqual(TargetOs.arch, TargetOs.fromDistroId("arch"));
+    try testing.expectEqual(TargetOs.arch, TargetOs.fromDistroId("archlinux"));
     try testing.expectEqual(TargetOs.ubuntu, TargetOs.fromDistroId("\"ubuntu\""));
     try testing.expectEqual(TargetOs.fedora, TargetOs.fromDistroId("Fedora"));
     try testing.expectEqual(TargetOs.nixos, TargetOs.fromDistroId("nixos"));
+    try testing.expectEqual(TargetOs.mint, TargetOs.fromDistroId("linuxmint"));
+    try testing.expectEqual(TargetOs.redhat, TargetOs.fromDistroId("rhel"));
+    try testing.expectEqual(TargetOs.opensuse, TargetOs.fromDistroId("opensuse-tumbleweed"));
+    try testing.expectEqual(TargetOs.pop, TargetOs.fromDistroId("pop_os"));
     try testing.expectEqual(TargetOs.linux, TargetOs.fromDistroId("unknown_distro"));
 }
 

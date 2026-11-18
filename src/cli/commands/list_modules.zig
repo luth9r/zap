@@ -1,6 +1,7 @@
 const std = @import("std");
 const registry = @import("../../modules/registry.zig");
 const module_pkg = @import("../../modules/module.zig");
+const prompt_engine = @import("../../engine/prompt.zig");
 const BufferWriter = @import("../../utils/buffer_writer.zig").BufferWriter;
 
 pub fn execute(io: std.Io) !void {
@@ -23,12 +24,12 @@ pub fn printModuleList(writer: anytype) !void {
     inline for (@typeInfo(registry).@"struct".decls) |decl| {
         const mod = @field(registry, decl.name);
         const name = decl.name;
-        const category = if (@hasDecl(mod, "Config") and @hasDecl(mod, "Var") and @typeInfo(mod.Var).@"enum".fields.len == 3) "languages" else if (std.mem.startsWith(u8, @typeName(mod), "modules.languages.") or std.mem.eql(u8, name, "zig_lang") or std.mem.eql(u8, name, "python") or std.mem.eql(u8, name, "golang") or std.mem.eql(u8, name, "rust") or std.mem.eql(u8, name, "nodejs") or std.mem.eql(u8, name, "dotnet") or std.mem.eql(u8, name, "java") or std.mem.eql(u8, name, "c") or std.mem.eql(u8, name, "lua") or std.mem.eql(u8, name, "nix") or std.mem.eql(u8, name, "docker")) "languages" else "core";
+        const category = if (@hasDecl(mod, "detect")) "languages" else "core";
 
         const cfg = if (module_pkg.resolveConfigType(mod)) |CfgT| CfgT{} else struct {}{};
         const symbol = if (@hasField(@TypeOf(cfg), "symbol")) @field(cfg, "symbol") else "-";
         const style = if (@hasField(@TypeOf(cfg), "style")) @field(cfg, "style") else "-";
-        const desc = getModuleDescription(decl.name);
+        const desc = getModuleDescription(@field(prompt_engine.ModuleVar, decl.name));
 
         try writer.print("  {s:<14} {s:<12} {s:<8} {s:<16} {s}\n", .{
             name,
@@ -41,28 +42,29 @@ pub fn printModuleList(writer: anytype) !void {
     try writer.writeAll("\n");
 }
 
-fn getModuleDescription(comptime name: []const u8) []const u8 {
-    if (std.mem.eql(u8, name, "directory")) return "Current working directory with smart truncation";
-    if (std.mem.eql(u8, name, "git_branch")) return "Active Git branch name and remote tracking";
-    if (std.mem.eql(u8, name, "git_commit")) return "Git commit SHA hash and active tag";
-    if (std.mem.eql(u8, name, "git_state")) return "Git operational state (rebase, merge, bisect)";
-    if (std.mem.eql(u8, name, "git_status")) return "Git working tree status indicators";
-    if (std.mem.eql(u8, name, "cmd_duration")) return "Execution duration of previous command";
-    if (std.mem.eql(u8, name, "character")) return "Prompt status character";
-    if (std.mem.eql(u8, name, "os")) return "Operating system indicator symbol";
-    if (std.mem.eql(u8, name, "time")) return "Current local time";
-    if (std.mem.eql(u8, name, "zig_lang")) return "Zig compiler toolchain and project indicator";
-    if (std.mem.eql(u8, name, "python")) return "Python virtual environment and project indicator";
-    if (std.mem.eql(u8, name, "golang")) return "Go module and workspace indicator";
-    if (std.mem.eql(u8, name, "rust")) return "Rust Cargo project and toolchain indicator";
-    if (std.mem.eql(u8, name, "nodejs")) return "Node.js / TypeScript / Bun project indicator";
-    if (std.mem.eql(u8, name, "dotnet")) return ".NET SDK, C# / F# solution and project indicator";
-    if (std.mem.eql(u8, name, "java")) return "Java / Maven / Gradle / JVM project indicator";
-    if (std.mem.eql(u8, name, "c")) return "C / C++ CMake, Makefile, and Meson project indicator";
-    if (std.mem.eql(u8, name, "lua")) return "Lua script and project configuration indicator";
-    if (std.mem.eql(u8, name, "nix")) return "Nix flake and declarative shell indicator";
-    if (std.mem.eql(u8, name, "docker")) return "Docker and Compose container context indicator";
-    return "Prompt module";
+fn getModuleDescription(mod_var: prompt_engine.ModuleVar) []const u8 {
+    return switch (mod_var) {
+        .directory => "Current working directory with smart truncation",
+        .git_branch => "Active Git branch name and remote tracking",
+        .git_commit => "Git commit SHA hash and active tag",
+        .git_state => "Git operational state (rebase, merge, bisect)",
+        .git_status => "Git working tree status indicators",
+        .cmd_duration => "Execution duration of previous command",
+        .character => "Prompt status character",
+        .os => "Operating system indicator symbol",
+        .time => "Current local time",
+        .zig_lang => "Zig compiler toolchain and project indicator",
+        .python => "Python virtual environment and project indicator",
+        .golang => "Go module and workspace indicator",
+        .rust => "Rust Cargo project and toolchain indicator",
+        .nodejs => "Node.js / TypeScript / Bun project indicator",
+        .dotnet => ".NET SDK, C# / F# solution and project indicator",
+        .java => "Java / Maven / Gradle / JVM project indicator",
+        .c => "C / C++ CMake, Makefile, and Meson project indicator",
+        .lua => "Lua script and project configuration indicator",
+        .nix => "Nix flake and declarative shell indicator",
+        .docker => "Docker and Compose container context indicator",
+    };
 }
 
 const testing = std.testing;

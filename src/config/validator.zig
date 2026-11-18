@@ -3,6 +3,7 @@ const registry = @import("../modules/registry.zig");
 const module_pkg = @import("../modules/module.zig");
 const style_mod = @import("../engine/style.zig");
 const toml_parser = @import("toml_parser.zig");
+const prompt_engine = @import("../engine/prompt.zig");
 const parse_utils = @import("../utils/parse_utils.zig");
 const extractVarName = parse_utils.extractVarName;
 
@@ -38,9 +39,9 @@ pub fn validateFormatString(
         if (format[i] == '[') {
             bracket_depth += 1;
             // Check for styled group `[content](style)`
-            if (findMatchingBracket(format, i)) |close_bracket| {
+            if (parse_utils.findMatchingDelimiter(format, i, '[', ']')) |close_bracket| {
                 if (close_bracket + 1 < format.len and format[close_bracket + 1] == '(') {
-                    if (findMatchingParen(format, close_bracket + 1)) |close_paren| {
+                    if (parse_utils.findMatchingDelimiter(format, close_bracket + 1, '(', ')')) |close_paren| {
                         const style_spec = format[close_bracket + 2 .. close_paren];
                         const trimmed_style = std.mem.trim(u8, style_spec, " \t");
                         // If style is not a variable reference like $style or $custom_style
@@ -136,42 +137,6 @@ pub fn validateFormatString(
     }
 }
 
-fn findMatchingBracket(str: []const u8, start_idx: usize) ?usize {
-    var depth: usize = 0;
-    var i: usize = start_idx;
-    while (i < str.len) {
-        if (str[i] == '\\' and i + 1 < str.len) {
-            i += 2;
-            continue;
-        }
-        if (str[i] == '[') depth += 1;
-        if (str[i] == ']') {
-            depth -= 1;
-            if (depth == 0) return i;
-        }
-        i += 1;
-    }
-    return null;
-}
-
-fn findMatchingParen(str: []const u8, start_idx: usize) ?usize {
-    var depth: usize = 0;
-    var i: usize = start_idx;
-    while (i < str.len) {
-        if (str[i] == '\\' and i + 1 < str.len) {
-            i += 2;
-            continue;
-        }
-        if (str[i] == '(') depth += 1;
-        if (str[i] == ')') {
-            depth -= 1;
-            if (depth == 0) return i;
-        }
-        i += 1;
-    }
-    return null;
-}
-
 const root_allowed_modules = blk: {
     const decls = @typeInfo(registry).@"struct".decls;
     var list: [decls.len][]const u8 = undefined;
@@ -199,7 +164,8 @@ pub fn validateContent(
 
         // Section header check
         if (line[0] == '[') {
-            if (line.len < 2 or line[line.len - 1] != ']') {
+            const clean_sec_line = toml_parser.stripInlineComment(line);
+            if (clean_sec_line.len < 2 or clean_sec_line[clean_sec_line.len - 1] != ']') {
                 try writer.print("✖ Error [{s}:{d}]: unclosed section header '{s}'\n", .{
                     file_display,
                     line_num,
@@ -209,7 +175,7 @@ pub fn validateContent(
                 continue;
             }
 
-            const sec_name = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+            const sec_name = std.mem.trim(u8, clean_sec_line[1 .. clean_sec_line.len - 1], " \t");
             if (sec_name.len == 0) {
                 try writer.print("✖ Error [{s}:{d}]: empty section header '[]'\n", .{
                     file_display,
@@ -220,14 +186,7 @@ pub fn validateContent(
             }
 
             // Check if section name is registered module
-            var is_registered_section = false;
-            inline for (@typeInfo(registry).@"struct".decls) |decl| {
-                if (std.mem.eql(u8, sec_name, decl.name)) {
-                    is_registered_section = true;
-                }
-            }
-
-            if (!is_registered_section) {
+            if (std.meta.stringToEnum(prompt_engine.ModuleVar, sec_name) == null) {
                 try writer.print("✖ Error [{s}:{d}]: unknown section '[{s}]'\n", .{
                     file_display,
                     line_num,
@@ -241,8 +200,7 @@ pub fn validateContent(
         }
 
         // Key-value pair check
-        const equal_idx_opt = std.mem.indexOfScalar(u8, line, '=');
-        if (equal_idx_opt == null) {
+        const kv = toml_parser.splitKeyVal(line) orelse {
             try writer.print("✖ Error [{s}:{d}]: syntax error, expected 'key = value', got '{s}'\n", .{
                 file_display,
                 line_num,
@@ -250,18 +208,25 @@ pub fn validateContent(
             });
             res.error_count += 1;
             continue;
-        }
-
-        const equal_idx = equal_idx_opt.?;
-        var key = std.mem.trim(u8, line[0..equal_idx], " \t");
-        var val = std.mem.trim(u8, line[equal_idx + 1 ..], " \t");
-
-        if (key.len >= 2 and key[0] == '"' and key[key.len - 1] == '"') {
-            key = key[1 .. key.len - 1];
-        }
+        };
+        const key = kv.key;
+        var val = kv.val;
 
         // Handle multiline strings
         if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
+            const quote_type = val[0..3];
+            const after_open = val[3..];
+            const has_closing = (after_open.len >= 3 and std.mem.endsWith(u8, after_open, quote_type)) or
+                (std.mem.indexOf(u8, content[(@intFromPtr(after_open.ptr) - @intFromPtr(content.ptr))..], quote_type) != null);
+            if (!has_closing) {
+                try writer.print("✖ Error [{s}:{d}]: unclosed multiline quote in value for '{s}'\n", .{
+                    file_display,
+                    line_num,
+                    key,
+                });
+                res.error_count += 1;
+                break;
+            }
             val = toml_parser.extractMultilineValue(val, content, &line_it);
         } else {
             val = toml_parser.stripInlineComment(val);
@@ -277,7 +242,7 @@ pub fn validateContent(
                     res.error_count += 1;
                     continue;
                 }
-                const target_sec = if (current_section) |s| s else key;
+                const target_sec = if (std.meta.stringToEnum(prompt_engine.ModuleVar, key) != null) key else (current_section orelse key);
                 const inner = std.mem.trim(u8, val[1 .. val.len - 1], " \t\r");
                 try validateInlineTable(writer, target_sec, inner, file_display, line_num, &res);
                 continue;
@@ -287,7 +252,8 @@ pub fn validateContent(
             if (val.len > 0) {
                 const quote_char = val[0];
                 if (quote_char == '"' or quote_char == '\'') {
-                    if (val.len < 2 or val[val.len - 1] != quote_char) {
+                    const is_escaped_end = quote_char == '"' and hasOddTrailingBackslashes(val[1 .. val.len - 1]);
+                    if (val.len < 2 or val[val.len - 1] != quote_char or is_escaped_end) {
                         try writer.print("✖ Error [{s}:{d}]: unclosed quote in value for '{s}'\n", .{
                             file_display,
                             line_num,
@@ -312,6 +278,20 @@ pub fn validateContent(
     return res;
 }
 
+fn hasOddTrailingBackslashes(slice: []const u8) bool {
+    var count: usize = 0;
+    var i: usize = slice.len;
+    while (i > 0) {
+        i -= 1;
+        if (slice[i] == '\\') {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    return (count % 2) == 1;
+}
+
 fn validateInlineTable(
     writer: anytype,
     target_section: []const u8,
@@ -320,13 +300,7 @@ fn validateInlineTable(
     line_num: usize,
     res: *ValidationResult,
 ) !void {
-    var is_registered_section = false;
-    inline for (@typeInfo(registry).@"struct".decls) |decl| {
-        if (std.mem.eql(u8, target_section, decl.name)) {
-            is_registered_section = true;
-        }
-    }
-    if (!is_registered_section) {
+    if (std.meta.stringToEnum(prompt_engine.ModuleVar, target_section) == null) {
         try writer.print("✖ Error [{s}:{d}]: unknown section '{s}' in inline table\n", .{
             file_display,
             line_num,
@@ -336,32 +310,9 @@ fn validateInlineTable(
         return;
     }
 
-    var pair_start: usize = 0;
-    var i: usize = 0;
-    var in_quotes: ?u8 = null;
-
-    while (i < content_inside.len) : (i += 1) {
-        const c = content_inside[i];
-        if (in_quotes) |q| {
-            if (c == '\\' and i + 1 < content_inside.len) {
-                i += 1;
-                continue;
-            }
-            if (c == q) {
-                in_quotes = null;
-            }
-        } else {
-            if (c == '"' or c == '\'') {
-                in_quotes = c;
-            } else if (c == ',') {
-                try validateInlinePair(writer, target_section, content_inside[pair_start..i], file_display, line_num, res);
-                pair_start = i + 1;
-            }
-        }
-    }
-
-    if (pair_start < content_inside.len) {
-        try validateInlinePair(writer, target_section, content_inside[pair_start..], file_display, line_num, res);
+    var it = toml_parser.InlineTableIterator.init(content_inside);
+    while (it.next()) |pair| {
+        try validateInlinePair(writer, target_section, pair, file_display, line_num, res);
     }
 }
 
@@ -376,7 +327,7 @@ fn validateInlinePair(
     const trimmed_item = std.mem.trim(u8, item, " \t\r");
     if (trimmed_item.len == 0) return;
 
-    const eq_idx = std.mem.indexOfScalar(u8, trimmed_item, '=') orelse {
+    const kv = toml_parser.splitKeyVal(trimmed_item) orelse {
         try writer.print("✖ Error [{s}:{d}]: syntax error in inline table [{s}], expected 'key = value', got '{s}'\n", .{
             file_display,
             line_num,
@@ -386,12 +337,8 @@ fn validateInlinePair(
         res.error_count += 1;
         return;
     };
-
-    var k = std.mem.trim(u8, trimmed_item[0..eq_idx], " \t");
-    var v = std.mem.trim(u8, trimmed_item[eq_idx + 1 ..], " \t");
-    if (k.len >= 2 and k[0] == '"' and k[k.len - 1] == '"') {
-        k = k[1 .. k.len - 1];
-    }
+    const k = kv.key;
+    var v = kv.val;
 
     if (v.len > 0) {
         const q = v[0];
@@ -712,4 +659,19 @@ test "unit: validateContent validates inline tables and right_format" {
     const res_err = try validateContent(writer, invalid_inline, "inline_err.toml");
     try std.testing.expect(!res_err.isValid());
     try std.testing.expectEqual(@as(usize, 3), res_err.error_count);
+}
+
+test "unit: zap.schema.json contains every registered module and core config field" {
+    const schema_json = @embedFile("zap_schema_json");
+    inline for (@typeInfo(registry).@"struct".decls) |decl| {
+        const key_pattern = "\"" ++ decl.name ++ "\"";
+        try std.testing.expect(std.mem.indexOf(u8, schema_json, key_pattern) != null);
+
+        const Mod = @field(registry, decl.name);
+        const CfgType = comptime module_pkg.resolveConfigType(Mod).?;
+        inline for (@typeInfo(CfgType).@"struct".fields) |f| {
+            const field_pattern = "\"" ++ f.name ++ "\"";
+            try std.testing.expect(std.mem.indexOf(u8, schema_json, field_pattern) != null);
+        }
+    }
 }

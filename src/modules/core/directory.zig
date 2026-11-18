@@ -1,6 +1,7 @@
 const std = @import("std");
 const formatter = @import("../../engine/formatter.zig");
 const path_utils = @import("../../utils/path_utils.zig");
+const parse_utils = @import("../../utils/parse_utils.zig");
 
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../engine/context.zig").DebugContext;
@@ -40,16 +41,21 @@ pub fn render(
 ) !void {
     if (config.disabled) return;
 
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
     var repo_root: ?[]const u8 = null;
 
     if (config.truncate_to_repo) {
-        const git_dir_opt = ctx.git_dir orelse if (ctx.io) |io_val|
-            @import("../../utils/git_utils.zig").findGitDir(io_val, ctx.cwd, &repo_root_buf)
+        const git_utils = @import("../../utils/git_utils.zig");
+        const git_dir_opt = if (ctx.io) |io_val|
+            ctx.getGitDir(io_val, &git_dir_buf)
         else
-            null;
+            ctx.git_dir;
         if (git_dir_opt) |git_dir| {
-            repo_root = @import("../../utils/git_utils.zig").gitDirToRepoRoot(git_dir);
+            repo_root = if (ctx.io) |io_val|
+                git_utils.resolveRepoRoot(io_val, ctx.cwd, git_dir, &repo_root_buf)
+            else
+                git_utils.gitDirToRepoRoot(git_dir);
         }
     }
 
@@ -64,38 +70,43 @@ pub fn render(
         repo_root,
     ) orelse ctx.cwd;
 
-    var is_read_only = false;
-    if (ctx.io) |io| {
-        if (std.Io.Dir.accessAbsolute(io, ctx.cwd, .{ .write = true })) |_| {
-            // Write access is granted
-        } else |_| {
-            is_read_only = true;
-        }
-    }
+    const is_read_only = if (ctx.io) |io| isDirReadOnly(io, ctx.cwd) else false;
     const read_only_val = if (is_read_only) config.read_only else "";
 
     try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
         .vars = &.{
-            .{ .name = .path, .value = path_str },
+            .{ .name = .path, .value = path_str, .escape_shell = true },
             .{ .name = .read_only, .value = read_only_val },
             .{ .name = .read_only_style, .value = config.read_only_style },
         },
     });
 }
 
+fn isDirReadOnly(io: std.Io, cwd: []const u8) bool {
+    if (cwd.len == 0) return false;
+    if (std.fs.path.isAbsolute(cwd)) {
+        if (std.Io.Dir.accessAbsolute(io, cwd, .{ .write = true })) |_| return false else |_| return true;
+    } else {
+        if (std.Io.Dir.cwd().access(io, cwd, .{ .write = true })) |_| return false else |_| return true;
+    }
+}
+
 pub fn debug(writer: anytype, dctx: DebugContext) !void {
-    const is_read_only = if (dctx.prompt.io) |io|
-        if (std.Io.Dir.accessAbsolute(io, dctx.prompt.cwd, .{ .write = true })) false else |_| true
-    else
-        false;
+    const is_read_only = if (dctx.prompt.io) |io| isDirReadOnly(io, dctx.prompt.cwd) else false;
 
     if (dctx.json) {
+        var j_cwd: [std.fs.max_path_bytes]u8 = undefined;
+        var j_home: [std.fs.max_path_bytes]u8 = undefined;
         try writer.print(
             \\{{ "module": "directory", "cwd": "{s}", "home": "{s}", "read_only": {} }}
             \\
-        , .{ dctx.prompt.cwd, dctx.prompt.home, is_read_only });
+        , .{
+            parse_utils.escapeJsonBuf(&j_cwd, dctx.prompt.cwd),
+            parse_utils.escapeJsonBuf(&j_home, dctx.prompt.home),
+            is_read_only,
+        });
     } else {
         try writer.print(
             \\⚡ Module: directory
@@ -107,7 +118,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     }
 }
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: directory default path renders home symbol" {
     var h = try Harness.create(std.testing.allocator);
@@ -268,4 +279,22 @@ test "integration: directory symlink rendering" {
 
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "symlinked_link");
+}
+
+test "integration: directory escapes shell expansion characters in bash and zsh" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    _ = try h.setCwd("dir_$(echo_pwn)_100%");
+    try h.setConfig(
+        \\format = "$directory"
+        \\add_newline = false
+    );
+
+    const bash_out = try h.collect(.bash);
+    try Harness.expectContains(bash_out, "\\$(echo_pwn)");
+
+    const zsh_out = try h.collect(.zsh);
+    try Harness.expectContains(zsh_out, "100%%");
+    try Harness.expectContains(zsh_out, "\\$(echo_pwn)");
 }

@@ -44,7 +44,7 @@ pub fn render(
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
+    const git_dir = ctx.getGitDir(io, &git_dir_buf) orelse return;
 
     var cur_buf: [32]u8 = undefined;
     var total_buf: [32]u8 = undefined;
@@ -76,14 +76,10 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     const io = dctx.prompt.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+    const git_dir_opt = dctx.prompt.getGitDir(io, &git_dir_buf);
 
     if (git_dir_opt == null) {
-        if (dctx.json) {
-            try writer.writeAll("{\"module\": \"git_state\", \"in_git_repo\": false}\n");
-        } else {
-            try writer.writeAll("⚡ Module: git_state\n  In Git Repo: false\n\n");
-        }
+        try git_utils.writeNotInGitRepo(writer, dctx.json, "git_state");
         return;
     }
 
@@ -108,7 +104,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     }
 }
 
-pub const Harness = @import("../../../tests/harness.zig").Harness;
+const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_state renders nothing in normal clean repo" {
     var h = try Harness.create(std.testing.allocator);

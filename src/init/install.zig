@@ -1,6 +1,7 @@
 const std = @import("std");
 const root = @import("root.zig");
 const platform = @import("../utils/platform.zig");
+const fs = @import("../utils/fs.zig");
 const Shell = root.Shell;
 
 const BASH_RC_REL = ".bashrc";
@@ -46,14 +47,34 @@ pub fn getHookSnippet(
     exe_name: []const u8,
     buf: []u8,
 ) ?[]const u8 {
+    var quoted_buf: [std.fs.max_path_bytes + 8]u8 = undefined;
+    const effective_exe = if (shell != .cmd and std.mem.indexOfScalar(u8, exe_name, ' ') != null)
+        std.fmt.bufPrint(&quoted_buf, "\"{s}\"", .{exe_name}) catch return null
+    else
+        exe_name;
+
     return switch (shell) {
-        .bash => std.fmt.bufPrint(buf, root.bash.HOOK_TEMPLATE, .{exe_name}) catch null,
-        .zsh => std.fmt.bufPrint(buf, root.zsh.HOOK_TEMPLATE, .{exe_name}) catch null,
-        .fish => std.fmt.bufPrint(buf, root.fish.HOOK_TEMPLATE, .{exe_name}) catch null,
-        .powershell => std.fmt.bufPrint(buf, root.powershell.HOOK_TEMPLATE, .{exe_name}) catch null,
+        .bash => std.fmt.bufPrint(buf, root.bash.HOOK_TEMPLATE, .{effective_exe}) catch null,
+        .zsh => std.fmt.bufPrint(buf, root.zsh.HOOK_TEMPLATE, .{effective_exe}) catch null,
+        .fish => std.fmt.bufPrint(buf, root.fish.HOOK_TEMPLATE, .{effective_exe}) catch null,
+        .powershell => std.fmt.bufPrint(buf, root.powershell.HOOK_TEMPLATE, .{effective_exe}) catch null,
         .cmd => std.fmt.bufPrint(buf, root.cmd.HOOK_TEMPLATE, .{exe_name}) catch null,
         .generic => null,
     };
+}
+
+fn containsActiveHookLine(content: []const u8, hook_cmd: []const u8, search_pattern: []const u8) bool {
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, " \t\r");
+        if (line.len == 0 or line[0] == '#' or std.mem.startsWith(u8, line, "--")) continue;
+        if (std.mem.indexOf(u8, line, hook_cmd) != null or
+            std.mem.indexOf(u8, line, search_pattern) != null)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 /// Installs the Zap prompt hook into the user's shell configuration file idempotently with automatic backup.
@@ -75,41 +96,44 @@ pub fn installHook(
         return false;
     };
 
-    var hook_buf: [256]u8 = undefined;
+    var hook_buf: [std.fs.max_path_bytes + 256]u8 = undefined;
     const hook_cmd = getHookSnippet(shell, exe_name, &hook_buf) orelse return false;
 
-    // Check if configuration file exists
+    // Check if configuration file exists and read its content safely
     var existing_content_buf: [128 * 1024]u8 = undefined;
-    var existing_len: usize = 0;
-    var file_exists = false;
+    const file_exists = fs.fileExists(io, config_path);
+    const existing_opt = fs.readFileRaw(io, config_path, &existing_content_buf);
+    const existing_len = if (existing_opt) |s| s.len else 0;
 
-    const file_res = if (std.fs.path.isAbsolute(config_path))
-        std.Io.Dir.openFileAbsolute(io, config_path, .{})
-    else
-        std.Io.Dir.cwd().openFile(io, config_path, .{});
+    if (file_exists and existing_opt == null) {
+        // Distinguish an empty 0-byte file from an unreadable existing file
+        const open_res = if (std.fs.path.isAbsolute(config_path))
+            std.Io.Dir.openFileAbsolute(io, config_path, .{})
+        else
+            std.Io.Dir.cwd().openFile(io, config_path, .{});
+        if (open_res) |f| {
+            f.close(io);
+        } else |err| {
+            try writer.print("✖ Error: failed to read existing config file '{s}': {any}\n", .{ config_path, err });
+            return false;
+        }
+    }
 
-    if (file_res) |f| {
-        var file = f;
-        defer file.close(io);
-        file_exists = true;
+    if (existing_len == existing_content_buf.len) {
+        try writer.print("✖ Error: config file '{s}' exceeds 128 KB safety buffer; refusing to overwrite to prevent truncation.\n", .{config_path});
+        return false;
+    }
 
-        var stream_buf: [4096]u8 = undefined;
-        var reader = file.reader(io, &stream_buf);
-        existing_len = reader.interface.readSliceShort(&existing_content_buf) catch 0;
-
-        const existing_content = existing_content_buf[0..existing_len];
-
-        // Check for existing hook (idempotency)
+    if (existing_opt) |existing_content| {
+        // Check for existing hook (idempotency, ignoring commented-out lines)
         var search_pattern_buf: [64]u8 = undefined;
         const search_pattern = std.fmt.bufPrint(&search_pattern_buf, "init {s}", .{@tagName(shell)}) catch @tagName(shell);
 
-        if (std.mem.indexOf(u8, existing_content, hook_cmd) != null or
-            std.mem.indexOf(u8, existing_content, search_pattern) != null)
-        {
+        if (containsActiveHookLine(existing_content, hook_cmd, search_pattern)) {
             try writer.print("ℹ Zap hook is already installed in '{s}'.\n", .{config_path});
             return true;
         }
-    } else |_| {}
+    }
 
     // Create backup if the file already exists and has content
     var backup_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -119,15 +143,7 @@ pub fn installHook(
             return false;
         };
 
-        const backup_file_res = if (std.fs.path.isAbsolute(backup_path))
-            std.Io.Dir.createFileAbsolute(io, backup_path, .{})
-        else
-            std.Io.Dir.cwd().createFile(io, backup_path, .{});
-
-        if (backup_file_res) |bf| {
-            var backup_file = bf;
-            defer backup_file.close(io);
-            try backup_file.writeStreamingAll(io, existing_content_buf[0..existing_len]);
+        if (fs.writeFile(io, backup_path, existing_content_buf[0..existing_len])) |_| {
             try writer.print("✔ Backup created at '{s}'.\n", .{backup_path});
         } else |err| {
             try writer.print("⚠ Warning: failed to create backup file '{s}': {any}\n", .{ backup_path, err });
@@ -140,7 +156,7 @@ pub fn installHook(
     }
 
     // Append hook snippet with clean demarcations
-    var append_buf: [512]u8 = undefined;
+    var append_buf: [std.fs.max_path_bytes + 512]u8 = undefined;
     const append_snippet = std.fmt.bufPrint(&append_buf, "\n# Zap prompt hook\n{s}\n", .{hook_cmd}) catch return false;
 
     // Write / append to configuration file

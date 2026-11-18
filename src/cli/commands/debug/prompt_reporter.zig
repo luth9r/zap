@@ -6,6 +6,7 @@ const toml_parser = @import("../../../config/toml_parser.zig");
 const prompt_engine = @import("../../../engine/prompt.zig");
 const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 const DebugContext = context.DebugContext;
 
@@ -14,18 +15,8 @@ pub fn computeVisibleWidth(str: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
     while (i < str.len) {
-        if (str[i] == '\x01' or str[i] == '\x02') {
-            i += 1;
-            continue;
-        }
-        if (i + 1 < str.len and str[i] == '%' and (str[i + 1] == '{' or str[i + 1] == '}')) {
-            i += 2;
-            continue;
-        }
-        if (str[i] == '\x1b' and i + 1 < str.len and str[i + 1] == '[') {
-            i += 2;
-            while (i < str.len and str[i] != 'm') : (i += 1) {}
-            if (i < str.len) i += 1;
+        if (parse_utils.skipAnsiOrShellMarker(str, i)) |next_i| {
+            i = next_i;
             continue;
         }
         if (str[i] == '\n' or str[i] == '\r') {
@@ -57,63 +48,22 @@ pub fn writeEscapedAnsi(writer: anytype, str: []const u8, for_json: bool) !void 
 }
 
 pub fn printPromptInspectorDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
-    const io = dctx.prompt.io orelse return;
-
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const config_path_opt = toml_parser.resolveExistingConfigPath(init.io, &path_buf, init.environ_map);
+    _ = dctx.prompt.io orelse return;
 
     var config = config_mod.defaultConfig();
     var config_file_buf: [64 * 1024]u8 = undefined;
-
-    if (config_path_opt) |config_path| {
-        const file = if (std.fs.path.isAbsolute(config_path))
-            std.Io.Dir.openFileAbsolute(init.io, config_path, .{}) catch null
-        else
-            std.Io.Dir.cwd().openFile(init.io, config_path, .{}) catch null;
-
-        if (file) |f| {
-            var handle = f;
-            defer handle.close(init.io);
-            var stream_buf: [4096]u8 = undefined;
-            var reader = handle.reader(init.io, &stream_buf);
-            const bytes_read = reader.interface.readSliceShort(&config_file_buf) catch 0;
-            if (bytes_read > 0) {
-                toml_parser.parseToml(&config, config_file_buf[0..bytes_read]);
-            }
-        }
-    }
+    toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
 
     const active_mask = prompt_engine.computeActiveModulesMask(config.format) | prompt_engine.computeActiveModulesMask(config.right_format);
     const decls = @typeInfo(registry).@"struct".decls;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var resolved_ctx = dctx.prompt;
-    if (resolved_ctx.git_dir == null) {
-        resolved_ctx.git_dir = git_utils.findGitDir(io, resolved_ctx.cwd, &git_dir_buf);
-    }
+    var git_status_data: git_utils.GitStatusInfo = undefined;
+    const resolved_ctx = prompt_engine.resolveGitContext(dctx.prompt, active_mask, config, &git_dir_buf, &git_status_data);
 
     var vars: [decls.len]formatter.Variable(prompt_engine.ModuleVar) = undefined;
-    var var_buffers: [decls.len][512]u8 = undefined;
-
-    inline for (decls, 0..) |decl, i| {
-        const mod = @field(registry, decl.name);
-        const is_active = (active_mask & (@as(u64, 1) << @as(u6, @intCast(i)))) != 0;
-        var pos: usize = 0;
-
-        if (is_active) {
-            const is_git_mod = @hasDecl(mod, "is_git_dependent") and mod.is_git_dependent;
-            if (!is_git_mod or resolved_ctx.git_dir != null) {
-                const mod_writer = BufferWriter.init(&var_buffers[i], &pos);
-                const mod_cfg = @field(config, decl.name);
-                try mod.render(mod_writer, mod_cfg, resolved_ctx);
-            }
-        }
-
-        vars[i] = .{
-            .name = @field(prompt_engine.ModuleVar, decl.name),
-            .value = var_buffers[i][0..pos],
-        };
-    }
+    var mod_buffers: prompt_engine.ModuleBuffers = undefined;
+    try prompt_engine.renderActiveModules(config, active_mask, resolved_ctx, &mod_buffers, &vars, null);
 
     var left_buf: [4096]u8 = undefined;
     var left_pos: usize = 0;

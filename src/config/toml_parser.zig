@@ -1,11 +1,23 @@
 const std = @import("std");
 const config_mod = @import("config.zig");
 const platform = @import("../utils/platform.zig");
+const fs = @import("../utils/fs.zig");
 
 const DOT_CONFIG_DIR = ".config";
 const CONFIG_DIR_NAME = "zap";
 const DEFAULT_CONFIG_FILE = "zap.toml";
 const CONFIG_CANDIDATES = [_][]const u8{ DEFAULT_CONFIG_FILE, "config.toml" };
+
+pub fn loadConfigFromPath(
+    io: std.Io,
+    config_path: []const u8,
+    config: *config_mod.Config,
+    content_buf: []u8,
+) usize {
+    const content = fs.readFileRaw(io, config_path, content_buf) orelse return 0;
+    parseToml(config, content);
+    return content.len;
+}
 
 pub fn loadConfigFile(
     io: std.Io,
@@ -15,28 +27,35 @@ pub fn loadConfigFile(
 ) void {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const config_path = resolveExistingConfigPath(io, &path_buf, environ_map) orelse return;
-
-    const file = if (std.fs.path.isAbsolute(config_path))
-        std.Io.Dir.openFileAbsolute(io, config_path, .{}) catch return
-    else
-        std.Io.Dir.cwd().openFile(io, config_path, .{}) catch return;
-    defer file.close(io);
-
-    var stream_buf: [4096]u8 = undefined;
-    var file_reader = file.reader(io, &stream_buf);
-
-    const bytes_read = file_reader.interface.readSliceShort(content_buf) catch return;
-    if (bytes_read == 0) return;
-
-    parseToml(config, content_buf[0..bytes_read]);
+    _ = loadConfigFromPath(io, config_path, config, content_buf);
 }
 
-/// Parses a section header `[section]` if the line is a section declaration.
-fn parseSectionHeader(line: []const u8) ?[]const u8 {
-    if (line.len >= 2 and line[0] == '[' and line[line.len - 1] == ']') {
-        return std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+/// Parses a section header `[section]` if the line is a section declaration (ignoring trailing comments).
+pub fn parseSectionHeader(line: []const u8) ?[]const u8 {
+    const clean = stripInlineComment(line);
+    if (clean.len >= 2 and clean[0] == '[' and clean[clean.len - 1] == ']') {
+        return std.mem.trim(u8, clean[1 .. clean.len - 1], " \t");
     }
     return null;
+}
+
+/// Splits a `key = val` line/pair, trimming whitespace and unquoting double-quoted keys.
+pub fn splitKeyVal(item: []const u8) ?struct { key: []const u8, val: []const u8 } {
+    const eq_idx = std.mem.indexOfScalar(u8, item, '=') orelse return null;
+    var k = std.mem.trim(u8, item[0..eq_idx], " \t");
+    const v = std.mem.trim(u8, item[eq_idx + 1 ..], " \t");
+    if (k.len >= 2 and k[0] == '"' and k[k.len - 1] == '"') {
+        k = k[1 .. k.len - 1];
+    }
+    return .{ .key = k, .val = v };
+}
+
+/// Strips surrounding matching double or single quotes from a slice.
+pub fn unquoteRaw(val: []const u8) []const u8 {
+    if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
+        return val[1 .. val.len - 1];
+    }
+    return val;
 }
 
 /// Strips an unquoted trailing inline comment (`# ...`) from a single-line TOML value.
@@ -65,12 +84,8 @@ pub fn stripInlineComment(val: []const u8) []const u8 {
 }
 
 /// Unquotes simple double- or single-quoted string values.
-fn unquoteValue(raw_val: []const u8) []const u8 {
-    const val = stripInlineComment(raw_val);
-    if (val.len >= 2 and ((val[0] == '"' and val[val.len - 1] == '"') or (val[0] == '\'' and val[val.len - 1] == '\''))) {
-        return val[1 .. val.len - 1];
-    }
-    return val;
+pub fn unquoteValue(raw_val: []const u8) []const u8 {
+    return unquoteRaw(stripInlineComment(raw_val));
 }
 
 /// Extracts a multiline string enclosed in triple quotes (""" or ''').
@@ -118,28 +133,25 @@ pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
             continue;
         }
 
-        if (std.mem.indexOfScalar(u8, line, '=')) |equal_idx| {
-            var key = std.mem.trim(u8, line[0..equal_idx], " \t");
-            var val = std.mem.trim(u8, line[equal_idx + 1 ..], " \t");
-
-            if (key.len >= 2 and key[0] == '"' and key[key.len - 1] == '"') {
-                key = key[1 .. key.len - 1];
-            }
+        if (splitKeyVal(line)) |kv| {
+            const key = kv.key;
+            var val = kv.val;
 
             if (std.mem.eql(u8, key, "$schema")) continue;
-
-            // Support TOML inline tables: key = { k1 = "v1", k2 = 123 }
-            if (val.len >= 2 and val[0] == '{' and val[val.len - 1] == '}') {
-                const inner = std.mem.trim(u8, val[1 .. val.len - 1], " \t\r");
-                const target_sec = if (current_section) |s| s else key;
-                parseInlineTable(config, target_sec, inner);
-                continue;
-            }
 
             if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
                 val = extractMultilineValue(val, content, &line_it);
             } else {
-                val = unquoteValue(val);
+                const clean_val = stripInlineComment(val);
+                // Support TOML inline tables: key = { k1 = "v1", k2 = 123 }
+                if (clean_val.len >= 2 and clean_val[0] == '{' and clean_val[clean_val.len - 1] == '}') {
+                    const inner = std.mem.trim(u8, clean_val[1 .. clean_val.len - 1], " \t\r");
+                    const is_mod_key = @hasField(config_mod.Config, "directory") and isConfigSectionField(key);
+                    const target_sec = if (is_mod_key) key else (current_section orelse key);
+                    parseInlineTable(config, target_sec, inner);
+                    continue;
+                }
+                val = unquoteRaw(clean_val);
             }
 
             applyValue(config, current_section, key, val);
@@ -147,47 +159,59 @@ pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
     }
 }
 
-fn parseInlineTable(config: *config_mod.Config, target_section: []const u8, content_inside: []const u8) void {
-    var pair_start: usize = 0;
-    var i: usize = 0;
-    var in_quotes: ?u8 = null;
+/// Quote-aware iterator over comma-separated `key = value` pairs inside a TOML inline table.
+pub const InlineTableIterator = struct {
+    content: []const u8,
+    pos: usize = 0,
 
-    while (i < content_inside.len) : (i += 1) {
-        const c = content_inside[i];
-        if (in_quotes) |q| {
-            if (c == '\\' and i + 1 < content_inside.len) {
-                i += 1;
-                continue;
-            }
-            if (c == q) {
-                in_quotes = null;
-            }
-        } else {
-            if (c == '"' or c == '\'') {
-                in_quotes = c;
-            } else if (c == ',') {
-                parseAndApplyPair(config, target_section, content_inside[pair_start..i]);
-                pair_start = i + 1;
-            }
-        }
+    pub fn init(content_inside: []const u8) InlineTableIterator {
+        return .{ .content = content_inside };
     }
 
-    if (pair_start < content_inside.len) {
-        parseAndApplyPair(config, target_section, content_inside[pair_start..]);
+    pub fn next(self: *InlineTableIterator) ?[]const u8 {
+        if (self.pos >= self.content.len) return null;
+
+        const pair_start = self.pos;
+        var i = self.pos;
+        var in_quotes: ?u8 = null;
+
+        while (i < self.content.len) : (i += 1) {
+            const c = self.content[i];
+            if (in_quotes) |q| {
+                if (c == '\\' and i + 1 < self.content.len) {
+                    i += 1;
+                    continue;
+                }
+                if (c == q) {
+                    in_quotes = null;
+                }
+            } else {
+                if (c == '"' or c == '\'') {
+                    in_quotes = c;
+                } else if (c == ',') {
+                    self.pos = i + 1;
+                    return self.content[pair_start..i];
+                }
+            }
+        }
+
+        self.pos = self.content.len;
+        return self.content[pair_start..];
+    }
+};
+
+fn parseInlineTable(config: *config_mod.Config, target_section: []const u8, content_inside: []const u8) void {
+    var it = InlineTableIterator.init(content_inside);
+    while (it.next()) |pair| {
+        parseAndApplyPair(config, target_section, pair);
     }
 }
 
 fn parseAndApplyPair(config: *config_mod.Config, target_section: []const u8, item: []const u8) void {
     const trimmed_item = std.mem.trim(u8, item, " \t\r");
     if (trimmed_item.len == 0) return;
-    if (std.mem.indexOfScalar(u8, trimmed_item, '=')) |eq_idx| {
-        var k = std.mem.trim(u8, trimmed_item[0..eq_idx], " \t");
-        var v = std.mem.trim(u8, trimmed_item[eq_idx + 1 ..], " \t");
-        if (k.len >= 2 and k[0] == '"' and k[k.len - 1] == '"') {
-            k = k[1 .. k.len - 1];
-        }
-        v = unquoteValue(v);
-        applyValue(config, target_section, k, v);
+    if (splitKeyVal(trimmed_item)) |kv| {
+        applyValue(config, target_section, kv.key, unquoteValue(kv.val));
     }
 }
 
@@ -228,6 +252,15 @@ fn applyGenericField(ptr: anytype, key: []const u8, val: []const u8) void {
             return;
         }
     }
+}
+
+fn isConfigSectionField(name: []const u8) bool {
+    inline for (@typeInfo(config_mod.Config).@"struct".fields) |f| {
+        if (@typeInfo(f.type) == .@"struct" and std.mem.eql(u8, f.name, name)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn applyValue(config: *config_mod.Config, section: ?[]const u8, key: []const u8, val: []const u8) void {
@@ -568,4 +601,19 @@ test "unit: parse inline comments after values while preserving hashes in quotes
     try std.testing.expectEqual(false, cfg.add_newline);
     try std.testing.expectEqual(@as(usize, 5), cfg.directory.truncation_length);
     try std.testing.expectEqualStrings("#89b4fa bold", cfg.directory.style);
+}
+
+test "unit: parse section header and inline table with trailing inline comments" {
+    const toml_text =
+        \\[directory] # directory section comment
+        \\truncation_length = 2
+        \\[git_branch] # branch section comment
+        \\symbol = "BR "
+    ;
+
+    var cfg: config_mod.Config = config_mod.defaultConfig();
+    parseToml(&cfg, toml_text);
+
+    try std.testing.expectEqual(@as(usize, 2), cfg.directory.truncation_length);
+    try std.testing.expectEqualStrings("BR ", cfg.git_branch.symbol);
 }

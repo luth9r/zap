@@ -16,7 +16,9 @@ pub const render = DockerModule.render;
 pub const buffer_size = DockerModule.buffer_size;
 pub const debug = DockerModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = DockerModule.detect;
+pub const module_name = DockerModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: docker satisfies module contract" {
     comptime module.validateModule(DockerModule);

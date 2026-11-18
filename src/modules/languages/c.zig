@@ -16,7 +16,9 @@ pub const render = CModule.render;
 pub const buffer_size = CModule.buffer_size;
 pub const debug = CModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = CModule.detect;
+pub const module_name = CModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: c satisfies module contract" {
     comptime module.validateModule(CModule);

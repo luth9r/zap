@@ -16,7 +16,9 @@ pub const render = NixModule.render;
 pub const buffer_size = NixModule.buffer_size;
 pub const debug = NixModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = NixModule.detect;
+pub const module_name = NixModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: nix satisfies module contract" {
     comptime module.validateModule(NixModule);

@@ -8,29 +8,9 @@ const prompt_reporter = @import("prompt_reporter.zig");
 const DebugContext = context.DebugContext;
 
 pub fn printStyleDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const config_path_opt = toml_parser.resolveExistingConfigPath(init.io, &path_buf, init.environ_map);
-
     var config = config_mod.defaultConfig();
     var config_file_buf: [64 * 1024]u8 = undefined;
-
-    if (config_path_opt) |config_path| {
-        const file = if (std.fs.path.isAbsolute(config_path))
-            std.Io.Dir.openFileAbsolute(init.io, config_path, .{}) catch null
-        else
-            std.Io.Dir.cwd().openFile(init.io, config_path, .{}) catch null;
-
-        if (file) |f| {
-            var handle = f;
-            defer handle.close(init.io);
-            var stream_buf: [4096]u8 = undefined;
-            var reader = handle.reader(init.io, &stream_buf);
-            const bytes_read = reader.interface.readSliceShort(&config_file_buf) catch 0;
-            if (bytes_read > 0) {
-                toml_parser.parseToml(&config, config_file_buf[0..bytes_read]);
-            }
-        }
-    }
+    toml_parser.loadConfigFile(init.io, init.environ_map, &config, &config_file_buf);
 
     const decls = @typeInfo(registry).@"struct".decls;
 

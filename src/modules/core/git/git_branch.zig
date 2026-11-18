@@ -1,6 +1,7 @@
 const std = @import("std");
 const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
@@ -55,6 +56,29 @@ pub fn truncateBranch(
     return std.fmt.bufPrint(buf, "{s}{s}", .{ branch[0..byte_idx], trunc_sym }) catch branch;
 }
 
+fn resolveRemoteBranch(
+    io: std.Io,
+    cwd: []const u8,
+    git_dir: []const u8,
+    config: GitBranchConfig,
+    git_status: ?*const git_utils.GitStatusInfo,
+    local_branch: []const u8,
+    trunc_buf: *[256]u8,
+) []const u8 {
+    var fallback_status: git_utils.GitStatusInfo = .{};
+    const status_ptr: *const git_utils.GitStatusInfo = git_status orelse blk: {
+        if (std.mem.indexOf(u8, config.format, "$remote_branch") == null) return "";
+        fallback_status = git_utils.getGitStatusForDir(io, cwd, git_dir);
+        break :blk &fallback_status;
+    };
+
+    const merge_short = status_ptr.head.getRemoteBranch();
+    if (merge_short.len == 0) return "";
+    if (!config.always_show_remote and std.mem.eql(u8, merge_short, local_branch)) return "";
+
+    return truncateBranch(trunc_buf, merge_short, config.truncation_length, config.truncation_symbol);
+}
+
 /// Renders the git_branch module according to configuration.
 pub fn render(
     writer: anytype,
@@ -65,52 +89,24 @@ pub fn render(
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
+    const git_dir = ctx.getGitDir(io, &git_dir_buf) orelse return;
 
-    var head_buf: [512]u8 = undefined;
-    const raw_branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf) orelse return;
+    var branch_buf: [256]u8 = undefined;
+    const raw_branch = git_utils.resolveBranch(io, ctx.cwd, git_dir, ctx.git_status, &branch_buf) orelse return;
 
     var trunc_buf: [256]u8 = undefined;
-    const branch_str = truncateBranch(
-        &trunc_buf,
-        raw_branch,
-        config.truncation_length,
-        config.truncation_symbol,
-    );
+    const branch_str = truncateBranch(&trunc_buf, raw_branch, config.truncation_length, config.truncation_symbol);
 
-    // Resolve upstream remote branch name if configured and different from local branch
-    var config_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    var git_cfg_buf: [4096]u8 = undefined;
     var remote_trunc_buf: [256]u8 = undefined;
-    var remote_branch_str: []const u8 = "";
-
-    if (std.fmt.bufPrint(&config_path_buf, "{s}/config", .{git_dir}) catch null) |cfg_path| {
-        if (git_utils.readSmallFile(io, cfg_path, &git_cfg_buf)) |cfg_content| {
-            const up = git_utils.git.ahead_behind.parseUpstreamFromConfig(cfg_content, raw_branch);
-            if (up.merge.len > 0) {
-                const merge_short = if (std.mem.startsWith(u8, up.merge, "refs/heads/"))
-                    up.merge["refs/heads/".len..]
-                else
-                    up.merge;
-                if (config.always_show_remote or !std.mem.eql(u8, merge_short, raw_branch)) {
-                    remote_branch_str = truncateBranch(
-                        &remote_trunc_buf,
-                        merge_short,
-                        config.truncation_length,
-                        config.truncation_symbol,
-                    );
-                }
-            }
-        }
-    }
+    const remote_branch_str = resolveRemoteBranch(io, ctx.cwd, git_dir, config, ctx.git_status, raw_branch, &remote_trunc_buf);
 
     try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
         .style = config.style,
         .shell = ctx.shell,
         .vars = &.{
             .{ .name = .symbol, .value = config.symbol },
-            .{ .name = .branch, .value = branch_str },
-            .{ .name = .remote_branch, .value = remote_branch_str },
+            .{ .name = .branch, .value = branch_str, .escape_shell = true },
+            .{ .name = .remote_branch, .value = remote_branch_str, .escape_shell = true },
         },
     });
 }
@@ -119,16 +115,24 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     const io = dctx.prompt.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+    const git_dir = dctx.prompt.getGitDir(io, &git_dir_buf);
 
-    var branch_buf: [512]u8 = undefined;
-    const branch = if (git_dir) |gd| git_utils.getGitBranchFromDir(io, gd, &branch_buf) else null;
+    var branch_buf: [256]u8 = undefined;
+    const branch = if (git_dir) |gd|
+        git_utils.resolveBranch(io, dctx.prompt.cwd, gd, dctx.prompt.git_status, &branch_buf)
+    else
+        null;
 
     if (dctx.json) {
+        var j_gd: [std.fs.max_path_bytes]u8 = undefined;
+        var j_br: [512]u8 = undefined;
         try writer.print(
             \\{{ "module": "git_branch", "git_dir": "{s}", "branch": "{s}" }}
             \\
-        , .{ git_dir orelse "", branch orelse "" });
+        , .{
+            parse_utils.escapeJsonBuf(&j_gd, git_dir orelse ""),
+            parse_utils.escapeJsonBuf(&j_br, branch orelse ""),
+        });
     } else {
         try writer.print(
             \\⚡ Module: git_branch
@@ -140,7 +144,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     }
 }
 
-pub const Harness = @import("../../../tests/harness.zig").Harness;
+const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "unit: truncateBranch below and above max_len" {
     var buf: [64]u8 = undefined;

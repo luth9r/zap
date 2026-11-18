@@ -1,6 +1,9 @@
 const std = @import("std");
 const registry = @import("../../../modules/registry.zig");
 const context = @import("../../../engine/context.zig");
+const config_mod = @import("../../../config/config.zig");
+const prompt_engine = @import("../../../engine/prompt.zig");
+const git_utils = @import("../../../utils/git_utils.zig");
 const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 
 pub const git_reporter = @import("git_reporter.zig");
@@ -36,6 +39,25 @@ pub const DebugTarget = enum {
     all,
 };
 
+fn resolveDebugCtx(
+    dctx: DebugContext,
+    active_mask: u64,
+    git_dir_buf: *[std.fs.max_path_bytes]u8,
+    git_status_data: *git_utils.GitStatusInfo,
+) DebugContext {
+    return .{
+        .prompt = prompt_engine.resolveGitContext(
+            dctx.prompt,
+            active_mask,
+            config_mod.defaultConfig(),
+            git_dir_buf,
+            git_status_data,
+        ),
+        .json = dctx.json,
+        .verbose = dctx.verbose,
+    };
+}
+
 pub fn execute(init: std.process.Init, args: Args) !void {
     var buf: [65536]u8 = undefined;
     var pos: usize = 0;
@@ -60,17 +82,22 @@ pub fn execute(init: std.process.Init, args: Args) !void {
     const target_str = args.module_name orelse "all";
     const target_enum_opt = std.meta.stringToEnum(DebugTarget, target_str);
 
+    var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var git_status_data: git_utils.GitStatusInfo = undefined;
+    const all_modules_mask: u64 = std.math.maxInt(u64);
+
     if (target_enum_opt) |target_enum| {
         switch (target_enum) {
             .git => {
                 if (dctx.verbose) {
                     try git_reporter.printGitVerboseDebug(init, writer, dctx);
                 } else {
+                    const resolved_dctx = resolveDebugCtx(dctx, prompt_engine.git_modules_mask, &git_dir_buf, &git_status_data);
                     inline for (@typeInfo(registry).@"struct".decls) |decl| {
                         const mod = @field(registry, decl.name);
                         if (std.mem.startsWith(u8, decl.name, "git_")) {
                             if (@hasDecl(mod, "debug")) {
-                                try mod.debug(writer, dctx);
+                                try mod.debug(writer, resolved_dctx);
                             }
                         }
                     }
@@ -84,10 +111,11 @@ pub fn execute(init: std.process.Init, args: Args) !void {
             .env => try env_reporter.printEnvDebug(init, writer, dctx),
             .shell => try env_reporter.printShellDebug(init, writer, dctx),
             .modules, .all => {
+                const resolved_dctx = resolveDebugCtx(dctx, all_modules_mask, &git_dir_buf, &git_status_data);
                 inline for (@typeInfo(registry).@"struct".decls) |decl| {
                     const mod = @field(registry, decl.name);
                     if (@hasDecl(mod, "debug")) {
-                        try mod.debug(writer, dctx);
+                        try mod.debug(writer, resolved_dctx);
                     }
                 }
             },
@@ -99,7 +127,9 @@ pub fn execute(init: std.process.Init, args: Args) !void {
             if (std.mem.eql(u8, target_str, decl.name)) {
                 if (@hasDecl(mod, "debug")) {
                     found = true;
-                    try mod.debug(writer, dctx);
+                    const single_mask = prompt_engine.computeActiveModulesMask("$" ++ decl.name);
+                    const resolved_dctx = resolveDebugCtx(dctx, single_mask, &git_dir_buf, &git_status_data);
+                    try mod.debug(writer, resolved_dctx);
                 }
             }
         }
@@ -113,12 +143,7 @@ pub fn execute(init: std.process.Init, args: Args) !void {
     }
 
     if (args.output_path) |out_path| {
-        var file = if (std.fs.path.isAbsolute(out_path))
-            try std.Io.Dir.createFileAbsolute(init.io, out_path, .{})
-        else
-            try std.Io.Dir.cwd().createFile(init.io, out_path, .{});
-        defer file.close(init.io);
-        try file.writeStreamingAll(init.io, buf[0..pos]);
+        try @import("../../../utils/fs.zig").writeFile(init.io, out_path, buf[0..pos]);
     } else {
         try std.Io.File.stdout().writeStreamingAll(init.io, buf[0..pos]);
     }

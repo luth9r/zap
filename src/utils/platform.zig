@@ -65,6 +65,15 @@ pub fn pathEql(a: []const u8, b: []const u8) bool {
     return pathStartsWith(a, b);
 }
 
+/// Returns true if `path` equals `base` or is a subpath strictly inside `base` (respecting path separator boundaries).
+pub fn pathIsSubpath(path: []const u8, base: []const u8) bool {
+    if (base.len == 0) return false;
+    if (!pathStartsWith(path, base)) return false;
+    if (path.len == base.len) return true;
+    if (isSep(base[base.len - 1])) return true;
+    return isSep(path[base.len]);
+}
+
 pub fn joinPath(buf: []u8, base: []const u8, sub: []const u8) ?[]const u8 {
     const trimmed_base = if (base.len > 1 and isSep(base[base.len - 1]))
         base[0 .. base.len - 1]
@@ -97,9 +106,7 @@ pub fn joinParts(buf: []u8, parts: []const []const u8) ?[]const u8 {
 }
 
 pub fn fileExistsAbsolute(io: std.Io, path: []const u8) bool {
-    const f = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return false;
-    f.close(io);
-    return true;
+    if (std.Io.Dir.accessAbsolute(io, path, .{})) |_| return true else |_| return false;
 }
 
 pub fn buildPathWithPrependedDir(alloc: std.mem.Allocator, dir: []const u8) ![]const u8 {
@@ -316,6 +323,8 @@ test "unit: platform.pathStartsWith handles mixed separators" {
     try testing.expect(pathStartsWith("/home/user/zap", "/home/user"));
     try testing.expect(pathStartsWith("C:\\Users\\user\\zap", "C:/Users/user"));
     try testing.expect(!pathStartsWith("/home/other", "/home/user"));
+    try testing.expect(pathIsSubpath("/home/user/zap", "/home/user"));
+    try testing.expect(!pathIsSubpath("/home/user-other", "/home/user"));
 }
 
 test "unit: platform.joinPath avoids duplicate separators" {

@@ -34,6 +34,28 @@ fn writeSlice(buf: []u8, pos: *usize, s: []const u8) bool {
     return true;
 }
 
+fn writeClockComponents(
+    buf: []u8,
+    pos: *usize,
+    hour: u8,
+    minute: u8,
+    second: ?u8,
+    ampm: ?[]const u8,
+) bool {
+    if (!writeTwoDigits(buf, pos, hour)) return false;
+    if (!writeSlice(buf, pos, ":")) return false;
+    if (!writeTwoDigits(buf, pos, minute)) return false;
+    if (second) |sec| {
+        if (!writeSlice(buf, pos, ":")) return false;
+        if (!writeTwoDigits(buf, pos, sec)) return false;
+    }
+    if (ampm) |ap| {
+        if (!writeSlice(buf, pos, " ")) return false;
+        if (!writeSlice(buf, pos, ap)) return false;
+    }
+    return true;
+}
+
 /// Formats a LocalTime according to `time_format` into `buf`.
 pub fn formatTimeBuf(
     buf: []u8,
@@ -47,44 +69,25 @@ pub fn formatTimeBuf(
         break :blk if (mod == 0) 12 else mod;
     };
     const ampm: []const u8 = if (lt.hour < 12) "AM" else "PM";
+    const h_clock = if (use_12hr) h12 else lt.hour;
+    const ampm_opt: ?[]const u8 = if (use_12hr) ampm else null;
 
     var i: usize = 0;
     while (i < time_format.len) : (i += 1) {
         if (time_format[i] == '%' and i + 1 < time_format.len) {
             i += 1;
-            switch (time_format[i]) {
-                'H' => if (!writeTwoDigits(buf, &pos, lt.hour)) return null,
-                'I' => if (!writeTwoDigits(buf, &pos, h12)) return null,
-                'M' => if (!writeTwoDigits(buf, &pos, lt.minute)) return null,
-                'S' => if (!writeTwoDigits(buf, &pos, lt.second)) return null,
-                'p' => if (!writeSlice(buf, &pos, ampm)) return null,
-                'T' => {
-                    const h = if (use_12hr) h12 else lt.hour;
-                    if (!writeTwoDigits(buf, &pos, h)) return null;
-                    if (!writeSlice(buf, &pos, ":")) return null;
-                    if (!writeTwoDigits(buf, &pos, lt.minute)) return null;
-                    if (!writeSlice(buf, &pos, ":")) return null;
-                    if (!writeTwoDigits(buf, &pos, lt.second)) return null;
-                    if (use_12hr) {
-                        if (!writeSlice(buf, &pos, " ")) return null;
-                        if (!writeSlice(buf, &pos, ampm)) return null;
-                    }
-                },
-                'R' => {
-                    const h = if (use_12hr) h12 else lt.hour;
-                    if (!writeTwoDigits(buf, &pos, h)) return null;
-                    if (!writeSlice(buf, &pos, ":")) return null;
-                    if (!writeTwoDigits(buf, &pos, lt.minute)) return null;
-                    if (use_12hr) {
-                        if (!writeSlice(buf, &pos, " ")) return null;
-                        if (!writeSlice(buf, &pos, ampm)) return null;
-                    }
-                },
-                '%' => if (!writeSlice(buf, &pos, "%")) return null,
-                else => |c| {
-                    if (!writeSlice(buf, &pos, &.{ '%', c })) return null;
-                },
-            }
+            const ok = switch (time_format[i]) {
+                'H' => writeTwoDigits(buf, &pos, lt.hour),
+                'I' => writeTwoDigits(buf, &pos, h12),
+                'M' => writeTwoDigits(buf, &pos, lt.minute),
+                'S' => writeTwoDigits(buf, &pos, lt.second),
+                'p' => writeSlice(buf, &pos, ampm),
+                'T' => writeClockComponents(buf, &pos, h_clock, lt.minute, lt.second, ampm_opt),
+                'R' => writeClockComponents(buf, &pos, h_clock, lt.minute, null, ampm_opt),
+                '%' => writeSlice(buf, &pos, "%"),
+                else => |c| writeSlice(buf, &pos, &.{ '%', c }),
+            };
+            if (!ok) return null;
         } else {
             if (!writeSlice(buf, &pos, &.{time_format[i]})) return null;
         }

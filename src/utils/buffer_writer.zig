@@ -19,9 +19,20 @@ pub const BufferWriter = struct {
 
     pub fn writeAll(self: BufferWriter, bytes: []const u8) !void {
         const avail = self.buf.len - self.pos.*;
-        const copy_len = @min(bytes.len, avail);
+        if (avail == 0 or bytes.len == 0) return;
+        var copy_len = @min(bytes.len, avail);
+        // If truncating, avoid splitting a multi-byte UTF-8 codepoint at the boundary
+        if (copy_len < bytes.len) {
+            while (copy_len > 0 and (bytes[copy_len] & 0xC0) == 0x80) {
+                copy_len -= 1;
+            }
+        }
         @memcpy(self.buf[self.pos.* .. self.pos.* + copy_len], bytes[0..copy_len]);
         self.pos.* += copy_len;
+    }
+
+    pub fn remaining(self: BufferWriter) usize {
+        return self.buf.len - self.pos.*;
     }
 
     pub fn print(self: BufferWriter, comptime fmt: []const u8, args: anytype) !void {

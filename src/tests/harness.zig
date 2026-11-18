@@ -3,7 +3,7 @@ const testing = std.testing;
 const Shell = @import("../init/root.zig").Shell;
 const Fixture = @import("fixture.zig").Fixture;
 const assertions = @import("assertions.zig");
-const git_utils = @import("../utils/git_utils.zig");
+const fs = @import("../utils/fs.zig");
 const platform = @import("../utils/platform.zig");
 
 /// Integration test harness for Zap prompt modules.
@@ -57,9 +57,7 @@ pub const Harness = struct {
     cmd_duration: u64,
 
     const relative_zap_bin = "zig-out/bin/zap" ++ platform.exe_ext;
-
-    pub const getEnvWindows = platform.getEnvWindows;
-    pub const setEnvWindows = platform.setEnvWindows;
+    const all_shells = [_]Shell{ .bash, .zsh, .fish, .powershell, .cmd };
 
     /// Create an isolated test environment with a fresh temporary directory.
     /// The zap binary must be pre-built (`zig build` runs before `zig build test`
@@ -111,7 +109,7 @@ pub const Harness = struct {
 
     /// Clean up: remove temp directory and free all memory.
     pub fn destroy(self: *Harness) void {
-        setEnvWindows("ZAP_CONFIG", null);
+        platform.setEnvWindows("ZAP_CONFIG", null);
         const io = std.testing.io;
         std.Io.Dir.cwd().deleteTree(io, self.tmp_dir) catch {};
         self.arena.deinit();
@@ -161,7 +159,7 @@ pub const Harness = struct {
 
         var exclude_buf: [std.fs.max_path_bytes]u8 = undefined;
         const exclude_path = platform.joinPath(&exclude_buf, tpl_path, ".git/info/exclude") orelse return error.NameTooLong;
-        try git_utils.writeFileAbsolute(io, exclude_path, "config.toml\n");
+        try fs.writeFileAbsolute(io, exclude_path, "config.toml\n");
 
         try self.run(&.{ "git", "-C", tpl_path, "commit", "--allow-empty", "-m", "initial" });
 
@@ -246,7 +244,7 @@ pub const Harness = struct {
     /// ```
     pub fn writeFile(self: *Harness, rel_path: []const u8, content: []const u8) !void {
         const full_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}/{s}", .{ self.tmp_dir, rel_path });
-        try git_utils.writeFileAbsolute(std.testing.io, full_path, content);
+        try fs.writeFileAbsolute(std.testing.io, full_path, content);
     }
 
     /// Delete a file inside the test directory.
@@ -383,23 +381,42 @@ pub const Harness = struct {
         var xdg_buf: [std.fs.max_path_bytes]u8 = undefined;
         const xdg_val = platform.joinPath(&xdg_buf, self.tmp_dir, ".config");
         const zap_dir = std.fs.path.dirname(self.zap_bin) orelse ".";
-        const path_val = try platform.buildPathWithPrependedDir(alloc, zap_dir);
 
         var orig_path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const orig_path = if (platform.is_windows) platform.getEnvWindows("PATH", &orig_path_buf) else null;
         defer if (platform.is_windows) platform.setEnvWindows("PATH", orig_path);
 
-        const env_vars = [_]platform.EnvEntry{
-            .{ .key = "HOME", .value = self.tmp_dir },
-            .{ .key = "USERPROFILE", .value = self.tmp_dir },
-            .{ .key = "XDG_CONFIG_HOME", .value = xdg_val },
-            .{ .key = "ZAP_CONFIG", .value = null },
-            .{ .key = "PATH", .value = path_val },
-        };
-
-        var child = platform.spawnWithEnv(io, alloc, self.tmp_dir, &env_vars, argv) catch |err| switch (err) {
-            error.FileNotFound => return null,
-            else => return err,
+        var child = if (platform.is_windows) blk: {
+            const path_val = try platform.buildPathWithPrependedDir(alloc, zap_dir);
+            const env_vars = [_]platform.EnvEntry{
+                .{ .key = "HOME", .value = self.tmp_dir },
+                .{ .key = "USERPROFILE", .value = self.tmp_dir },
+                .{ .key = "XDG_CONFIG_HOME", .value = xdg_val },
+                .{ .key = "ZAP_CONFIG", .value = null },
+                .{ .key = "PATH", .value = path_val },
+            };
+            break :blk platform.spawnWithEnv(io, alloc, self.tmp_dir, &env_vars, argv) catch |err| switch (err) {
+                error.FileNotFound => return null,
+                else => return err,
+            };
+        } else blk: {
+            const env_vars = [_]platform.EnvEntry{
+                .{ .key = "HOME", .value = self.tmp_dir },
+                .{ .key = "USERPROFILE", .value = self.tmp_dir },
+                .{ .key = "XDG_CONFIG_HOME", .value = xdg_val },
+                .{ .key = "ZAP_CONFIG", .value = null },
+            };
+            var sh_argv = try alloc.alloc([]const u8, 5 + argv.len);
+            sh_argv[0] = "sh";
+            sh_argv[1] = "-c";
+            sh_argv[2] = "PATH=\"$1:$PATH\"; shift; exec \"$@\"";
+            sh_argv[3] = "_";
+            sh_argv[4] = zap_dir;
+            @memcpy(sh_argv[5..], argv);
+            break :blk platform.spawnWithEnv(io, alloc, self.tmp_dir, &env_vars, sh_argv) catch |err| switch (err) {
+                error.FileNotFound => return null,
+                else => return err,
+            };
         };
 
         var out_buf: [4096]u8 = undefined;
@@ -489,10 +506,9 @@ pub const Harness = struct {
     ///
     /// Returns the generic (no shell wrapping) output for content assertions.
     pub fn collectAllShells(self: *Harness) ![]const u8 {
-        const shells = [_]Shell{ .bash, .zsh, .fish, .powershell, .cmd };
         var shell_buf: [4096]u8 = undefined;
 
-        for (shells) |shell| {
+        for (all_shells) |shell| {
             const out = try self.collect(shell);
             try Fixture.assertValidShellAnsi(out, shell);
 
@@ -516,10 +532,9 @@ pub const Harness = struct {
     /// Helper: asserts that ALL 4 shells (Bash, Zsh, Fish, PowerShell) produce
     /// valid ANSI wrapping AND contain the expected substring.
     pub fn expectAllShellsContains(self: *Harness, expected: []const u8) !void {
-        const shells = [_]Shell{ .bash, .zsh, .fish, .powershell, .cmd };
         var shell_buf: [4096]u8 = undefined;
 
-        for (shells) |shell| {
+        for (all_shells) |shell| {
             const out = try self.collect(shell);
             try Fixture.assertValidShellAnsi(out, shell);
             try expectContains(out, expected);
@@ -529,9 +544,7 @@ pub const Harness = struct {
 
     /// Helper: asserts that ALL 4 shells produce output that does NOT contain the needle.
     pub fn expectAllShellsNotContains(self: *Harness, needle: []const u8) !void {
-        const shells = [_]Shell{ .bash, .zsh, .fish, .powershell, .cmd };
-
-        for (shells) |shell| {
+        for (all_shells) |shell| {
             const out = try self.collect(shell);
             try Fixture.assertValidShellAnsi(out, shell);
             try expectNotContains(out, needle);
@@ -554,18 +567,8 @@ pub const Harness = struct {
             return err;
         };
 
-        var err_stream_buf: [256]u8 = undefined;
-        var err_reader = child.stderr.?.reader(io, &err_stream_buf);
         var err_buf: [4096]u8 = undefined;
-        var err_read: usize = 0;
-        while (err_read < err_buf.len) {
-            const n = err_reader.interface.readSliceShort(err_buf[err_read..]) catch |err| {
-                std.debug.print("[HARNESS] Stderr read error: {any}\n", .{err});
-                return err;
-            };
-            if (n == 0) break;
-            err_read += n;
-        }
+        const err_read = platform.readStreamToBuf(io, child.stderr.?, &err_buf);
 
         const term = child.wait(io) catch return error.CommandFailed;
         switch (term) {

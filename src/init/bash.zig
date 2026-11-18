@@ -10,10 +10,16 @@ pub const SCRIPT =
     \\_zap_first_prompt="1"
     \\
     \\_zap_preexec() {
+    \\    if [[ "$BASH_COMMAND" == "_zap_prompt_command"* ]]; then
+    \\        return
+    \\    fi
+    \\    case "$BASH_COMMAND" in
+    \\        clear|cls|reset|"clear "*|"cls "*|"reset "*) _zap_first_prompt="1" ;;
+    \\    esac
     \\    if [ "$_zap_preexec_ready" = "true" ]; then
     \\        _zap_preexec_ready="false"
     \\        if [ -n "$EPOCHREALTIME" ]; then
-    \\            _zap_start_time="$EPOCHREALTIME"
+    \\            _zap_start_time="${EPOCHREALTIME/,/.}"
     \\        else
     \\            _zap_start_time="$(date +%s 2>/dev/null || echo 0)000"
     \\        fi
@@ -27,7 +33,7 @@ pub const SCRIPT =
     \\    if [ -n "$_zap_start_time" ]; then
     \\        local end_time
     \\        if [ -n "$EPOCHREALTIME" ]; then
-    \\            end_time="$EPOCHREALTIME"
+    \\            end_time="${EPOCHREALTIME/,/.}"
     \\        else
     \\            end_time="$(date +%s 2>/dev/null || echo 0)000"
     \\        fi
@@ -56,8 +62,12 @@ pub const SCRIPT =
     \\    fi
     \\}
     \\
-    \\if [[ ! "$PROMPT_COMMAND" =~ _zap_prompt_command ]]; then
-    \\    PROMPT_COMMAND="_zap_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    \\if [[ ! "${PROMPT_COMMAND[*]}" =~ _zap_prompt_command ]]; then
+    \\    if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+    \\        PROMPT_COMMAND=(_zap_prompt_command "${PROMPT_COMMAND[@]}")
+    \\    else
+    \\        PROMPT_COMMAND="_zap_prompt_command${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    \\    fi
     \\fi
     \\
     \\if ! type preexec >/dev/null 2>&1; then

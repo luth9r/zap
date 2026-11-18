@@ -16,7 +16,9 @@ pub const render = LuaModule.render;
 pub const buffer_size = LuaModule.buffer_size;
 pub const debug = LuaModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = LuaModule.detect;
+pub const module_name = LuaModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: lua satisfies module contract" {
     comptime module.validateModule(LuaModule);

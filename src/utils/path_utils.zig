@@ -38,6 +38,35 @@ pub fn formatPathBuf(
     return buf[0..pos];
 }
 
+fn truncateSegments(
+    rel_path: []const u8,
+    initial_segments: usize,
+    truncation_length: usize,
+) ?[]const u8 {
+    var total_segments: usize = initial_segments;
+    var count_it = std.mem.tokenizeAny(u8, rel_path, "/\\");
+    while (count_it.next()) |_| {
+        total_segments += 1;
+    }
+
+    if (total_segments <= truncation_length) return null;
+
+    const segments_to_skip = total_segments - truncation_length;
+    var seg_start: usize = 0;
+    var skipped: usize = initial_segments;
+
+    var iter = std.mem.tokenizeAny(u8, rel_path, "/\\");
+    while (iter.next()) |seg| {
+        if (skipped >= segments_to_skip) {
+            seg_start = @intFromPtr(seg.ptr) - @intFromPtr(rel_path.ptr);
+            break;
+        }
+        skipped += 1;
+    }
+
+    return rel_path[seg_start..];
+}
+
 pub fn formatPathTruncatedBuf(
     buf: []u8,
     cwd: []const u8,
@@ -58,33 +87,10 @@ pub fn formatPathTruncatedBuf(
                 if (truncation_length == 0) {
                     return std.fmt.bufPrint(buf, "{s}/{s}", .{ repo_name, rel_path }) catch null;
                 }
-
-                var segments_count: usize = 1; // starts with repo_name
-                var it = std.mem.tokenizeAny(u8, rel_path, "/\\");
-                while (it.next()) |_| {
-                    segments_count += 1;
+                if (truncateSegments(rel_path, 1, truncation_length)) |remaining| {
+                    return std.fmt.bufPrint(buf, "{s}{s}", .{ truncation_symbol, remaining }) catch null;
                 }
-
-                if (segments_count <= truncation_length) {
-                    return std.fmt.bufPrint(buf, "{s}/{s}", .{ repo_name, rel_path }) catch null;
-                }
-
-                const skip_segments = segments_count - truncation_length;
-                if (skip_segments == 1) {
-                    return std.fmt.bufPrint(buf, "{s}{s}", .{ truncation_symbol, rel_path }) catch null;
-                } else {
-                    var skip_idx: usize = 0;
-                    var passed: usize = 1;
-                    var seg_it = std.mem.tokenizeAny(u8, rel_path, "/\\");
-                    while (seg_it.next()) |seg| {
-                        passed += 1;
-                        if (passed > skip_segments) {
-                            skip_idx = @intFromPtr(seg.ptr) - @intFromPtr(rel_path.ptr);
-                            break;
-                        }
-                    }
-                    return std.fmt.bufPrint(buf, "{s}{s}", .{ truncation_symbol, rel_path[skip_idx..] }) catch null;
-                }
+                return std.fmt.bufPrint(buf, "{s}/{s}", .{ repo_name, rel_path }) catch null;
             }
         }
     }
@@ -104,37 +110,17 @@ pub fn formatPathTruncatedBuf(
         return std.fmt.bufPrint(buf, "{s}", .{home_symbol}) catch null;
     }
 
-    const path_after_home = if (is_home_prefixed and full_path.len > home_symbol.len and (full_path[home_symbol.len] == '/' or full_path[home_symbol.len] == '\\'))
+    const path_after_home = if (is_home_prefixed and full_path.len > home_symbol.len and isSep(full_path[home_symbol.len]))
         full_path[home_symbol.len + 1 ..]
     else
         std.mem.trimStart(u8, full_path, "/\\");
 
-    var total_segments: usize = if (is_home_prefixed) 1 else 0;
-    var count_it = std.mem.tokenizeAny(u8, path_after_home, "/\\");
-    while (count_it.next()) |_| {
-        total_segments += 1;
-    }
-
-    if (total_segments <= truncation_length) {
+    const initial_segments: usize = if (is_home_prefixed) 1 else 0;
+    const remaining = truncateSegments(path_after_home, initial_segments, truncation_length) orelse {
         return std.fmt.bufPrint(buf, "{s}", .{full_path}) catch null;
-    }
+    };
 
-    const segments_to_skip = total_segments - truncation_length;
-    var seg_start: usize = 0;
-    var skipped: usize = if (is_home_prefixed) 1 else 0;
-
-    var iter = std.mem.tokenizeAny(u8, path_after_home, "/\\");
-    while (iter.next()) |seg| {
-        if (skipped >= segments_to_skip) {
-            seg_start = @intFromPtr(seg.ptr) - @intFromPtr(path_after_home.ptr);
-            break;
-        }
-        skipped += 1;
-    }
-
-    const remaining = path_after_home[seg_start..];
-
-    if (is_home_prefixed and segments_to_skip > 0) {
+    if (is_home_prefixed) {
         return std.fmt.bufPrint(buf, "{s}/{s}{s}", .{ home_symbol, truncation_symbol, remaining }) catch null;
     } else {
         return std.fmt.bufPrint(buf, "{s}{s}", .{ truncation_symbol, remaining }) catch null;

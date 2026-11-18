@@ -6,15 +6,28 @@ pub const SCRIPT =
     \\# Zap prompt integration for PowerShell
     \\
     \\$global:_zap_start_time = $null
+    \\$global:_zap_last_history_id = -1
     \\$global:_zap_first_prompt = $true
     \\
     \\function global:prompt {
-    \\    $lastExitCodeForPrompt = if ($global:LASTEXITCODE -ne $null) { $global:LASTEXITCODE } else { 0 }
+    \\    $origQuestion = $?
+    \\    $lastExitCodeForPrompt = if (-not $origQuestion -and ($global:LASTEXITCODE -eq $null -or $global:LASTEXITCODE -eq 0)) { 1 } elseif ($global:LASTEXITCODE -ne $null) { $global:LASTEXITCODE } else { 0 }
     \\    $duration = 0
     \\
     \\    if ($global:_zap_start_time -ne $null) {
     \\        $duration = [math]::Round(((Get-Date) - $global:_zap_start_time).TotalMilliseconds)
     \\        $global:_zap_start_time = $null
+    \\    } else {
+    \\        $lastCmd = Get-History -Count 1 -ErrorAction SilentlyContinue
+    \\        if ($lastCmd -ne $null) {
+    \\            if ($global:_zap_last_history_id -ne -1 -and $lastCmd.Id -ne $global:_zap_last_history_id) {
+    \\                $duration = [math]::Max(0, [math]::Round(($lastCmd.EndExecutionTime - $lastCmd.StartExecutionTime).TotalMilliseconds))
+    \\                if ($lastCmd.CommandLine -match '^\s*(clear|cls|Clear-Host)(\s|$)') {
+    \\                    $global:_zap_first_prompt = $true
+    \\                }
+    \\            }
+    \\            $global:_zap_last_history_id = $lastCmd.Id
+    \\        }
     \\    }
     \\
     \\    $env:PWD = "$PWD"

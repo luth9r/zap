@@ -1,6 +1,7 @@
 const std = @import("std");
 const formatter = @import("../../../engine/formatter.zig");
 const git_utils = @import("../../../utils/git_utils.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
@@ -38,16 +39,22 @@ pub fn render(
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
+    const git_dir = ctx.getGitDir(io, &git_dir_buf) orelse return;
 
-    var head_buf: [512]u8 = undefined;
-    var ref_buf: [512]u8 = undefined;
-    const commit_info = git_utils.getGitCommit(io, git_dir, &head_buf, &ref_buf) orelse return;
+    var oid_buf: [64]u8 = undefined;
+    var tag_name_buf: [128]u8 = undefined;
+    const commit_info = git_utils.resolveCommit(
+        io,
+        ctx.cwd,
+        git_dir,
+        ctx.git_status,
+        !config.tag_disabled,
+        config.only_detached,
+        &oid_buf,
+        &tag_name_buf,
+    ) orelse return;
 
-    if (config.only_detached and !commit_info.is_detached) {
-        return;
-    }
-
+    if (config.only_detached and !commit_info.is_detached) return;
     if (commit_info.hash.len == 0) return;
 
     var short_hash = commit_info.hash;
@@ -67,7 +74,7 @@ pub fn render(
         .shell = ctx.shell,
         .vars = &.{
             .{ .name = .hash, .value = short_hash },
-            .{ .name = .tag, .value = tag_str },
+            .{ .name = .tag, .value = tag_str, .escape_shell = true },
         },
     });
 }
@@ -76,28 +83,25 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     const io = dctx.prompt.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+    const git_dir_opt = dctx.prompt.getGitDir(io, &git_dir_buf);
 
     if (git_dir_opt == null) {
-        if (dctx.json) {
-            try writer.writeAll("{\"module\": \"git_commit\", \"in_git_repo\": false}\n");
-        } else {
-            try writer.writeAll("⚡ Module: git_commit\n  In Git Repo: false\n\n");
-        }
+        try git_utils.writeNotInGitRepo(writer, dctx.json, "git_commit");
         return;
     }
 
     const git_dir = git_dir_opt.?;
-    var head_buf: [512]u8 = undefined;
-    var ref_buf: [512]u8 = undefined;
-    const commit_info = git_utils.getGitCommit(io, git_dir, &head_buf, &ref_buf);
+    var oid_buf: [64]u8 = undefined;
+    var tag_buf: [128]u8 = undefined;
+    const commit_info = git_utils.resolveCommit(io, dctx.prompt.cwd, git_dir, dctx.prompt.git_status, true, false, &oid_buf, &tag_buf);
 
     if (commit_info) |c| {
         if (dctx.json) {
+            var j_tag: [256]u8 = undefined;
             try writer.print(
                 \\{{ "module": "git_commit", "hash": "{s}", "tag": "{s}", "is_detached": {} }}
                 \\
-            , .{ c.hash, c.tag, c.is_detached });
+            , .{ c.hash, parse_utils.escapeJsonBuf(&j_tag, c.tag), c.is_detached });
         } else {
             try writer.print(
                 \\⚡ Module: git_commit
@@ -116,7 +120,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     }
 }
 
-pub const Harness = @import("../../../tests/harness.zig").Harness;
+const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_commit hidden on normal branch by default" {
     var h = try Harness.create(std.testing.allocator);
@@ -171,13 +175,10 @@ test "integration: git_commit custom hash length" {
 
     const out = try h.collectAllShells();
 
-    // Read the actual SHA from .git/HEAD
-    var head_buf: [128]u8 = undefined;
-    var path_buf: [1024]u8 = undefined;
-    const fs = @import("../../../utils/fs.zig");
-    const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
-    const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
-    const sha = std.mem.trim(u8, head_content, " \r\n");
+    var oid_buf: [64]u8 = undefined;
+    var tag_buf: [128]u8 = undefined;
+    const commit = git_utils.resolveCommit(std.testing.io, h.tmp_dir, h.tmp_dir, null, false, false, &oid_buf, &tag_buf) orelse return error.MissingHead;
+    const sha = commit.hash;
 
     try Harness.expectVisibleText(out, sha[0..5]);
     try Harness.expectVisibleText(out, "(");
@@ -203,13 +204,10 @@ test "integration: git_commit full hash length (0)" {
 
     const out = try h.collectAllShells();
 
-    // Read the actual SHA from .git/HEAD
-    var head_buf: [128]u8 = undefined;
-    var path_buf: [1024]u8 = undefined;
-    const fs = @import("../../../utils/fs.zig");
-    const head_path = try std.fmt.bufPrint(&path_buf, "{s}/.git/HEAD", .{h.tmp_dir});
-    const head_content = fs.readSmallFile(std.testing.io, head_path, &head_buf) orelse return error.MissingHead;
-    const sha = std.mem.trim(u8, head_content, " \r\n");
+    var oid_buf: [64]u8 = undefined;
+    var tag_buf: [128]u8 = undefined;
+    const commit = git_utils.resolveCommit(std.testing.io, h.tmp_dir, h.tmp_dir, null, false, false, &oid_buf, &tag_buf) orelse return error.MissingHead;
+    const sha = commit.hash;
 
     try Harness.expectVisibleText(out, sha);
 }
@@ -275,4 +273,31 @@ test "integration: git_commit tag_disabled = false shows tag" {
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "v1.0.0");
     try Harness.expectVisibleText(out, "");
+}
+
+test "integration: git_commit in git worktree resolves tag from common git dir" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("file.txt", "content");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "tagged commit" });
+    try h.git(&.{ "tag", "v2.5.0" });
+
+    const wt_path = try std.fmt.allocPrint(h.arena.allocator(), "{s}/wt", .{h.tmp_dir});
+    try h.git(&.{ "worktree", "add", "--detach", wt_path, "HEAD" });
+    _ = try h.setCwd("wt");
+
+    try h.setConfig(
+        \\format = "$git_branch$git_commit"
+        \\add_newline = false
+        \\
+        \\[git_commit]
+        \\tag_disabled = false
+    );
+
+    const out = try h.collect(.generic);
+    try Harness.expectVisibleText(out, "v2.5.0");
+    try Harness.expectNotContains(out, "on ");
 }

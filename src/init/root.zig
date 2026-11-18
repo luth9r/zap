@@ -15,14 +15,20 @@ pub const Shell = enum {
     powershell,
     cmd,
 
+    const map = std.StaticStringMapWithEql(Shell, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+        .{ "bash", .bash },
+        .{ "zsh", .zsh },
+        .{ "fish", .fish },
+        .{ "powershell", .powershell },
+        .{ "pwsh", .powershell },
+        .{ "cmd", .cmd },
+        .{ "cmd.exe", .cmd },
+        .{ "generic", .generic },
+        .{ "plain", .generic },
+    });
+
     pub fn parse(str: []const u8) ?Shell {
-        if (std.ascii.eqlIgnoreCase(str, "bash")) return .bash;
-        if (std.ascii.eqlIgnoreCase(str, "zsh")) return .zsh;
-        if (std.ascii.eqlIgnoreCase(str, "fish")) return .fish;
-        if (std.ascii.eqlIgnoreCase(str, "powershell") or std.ascii.eqlIgnoreCase(str, "pwsh")) return .powershell;
-        if (std.ascii.eqlIgnoreCase(str, "cmd") or std.ascii.eqlIgnoreCase(str, "cmd.exe")) return .cmd;
-        if (std.ascii.eqlIgnoreCase(str, "generic") or std.ascii.eqlIgnoreCase(str, "plain")) return .generic;
-        return null;
+        return map.get(str);
     }
 };
 

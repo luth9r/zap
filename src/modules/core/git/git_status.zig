@@ -6,7 +6,7 @@ const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
-pub const Var = enum { staged, stashed, modified, all_status, deleted, untracked, ahead_behind, up_to_date };
+pub const Var = enum { staged, stashed, modified, renamed, conflicted, all_status, deleted, untracked, ahead_behind, up_to_date };
 
 pub const GitStatusConfig = struct {
     // Format template for the git_status module.
@@ -21,6 +21,8 @@ pub const GitStatusConfig = struct {
     untracked: []const u8 = "?",
     // Symbol shown when files are deleted.
     deleted: []const u8 = "✘",
+    // Symbol shown when files are renamed.
+    renamed: []const u8 = "»",
     // Symbol shown when stashed changes exist.
     stashed: []const u8 = "$",
     // Symbol shown when local branch is ahead of remote.
@@ -52,6 +54,7 @@ pub fn formatAllStatus(
         "conflicted",
         "stashed",
         "deleted",
+        "renamed",
         "modified",
         "staged",
         "untracked",
@@ -84,32 +87,30 @@ pub fn formatAllStatus(
     return buf[0..pos];
 }
 
-/// Formats a count template string by replacing `$count`, `$ahead`, and `$behind` placeholders.
+const CountVar = enum { ahead, behind, count };
+
+/// Formats a count template string by replacing `$count`, `$ahead`, and `$behind` placeholders via the shared template formatter.
 fn formatCountTemplate(
     buf: []u8,
     template: []const u8,
     ahead: usize,
     behind: usize,
 ) []const u8 {
+    var ahead_buf: [20]u8 = undefined;
+    var behind_buf: [20]u8 = undefined;
+    const ahead_str = std.fmt.bufPrint(&ahead_buf, "{d}", .{ahead}) catch "0";
+    const behind_str = std.fmt.bufPrint(&behind_buf, "{d}", .{behind}) catch "0";
+    const count_str = if (ahead > 0) ahead_str else behind_str;
+
     var pos: usize = 0;
     const writer = BufferWriter.init(buf, &pos);
-    var i: usize = 0;
-    while (i < template.len) {
-        if (std.mem.startsWith(u8, template[i..], "$ahead")) {
-            writer.print("{d}", .{ahead}) catch {};
-            i += "$ahead".len;
-        } else if (std.mem.startsWith(u8, template[i..], "$behind")) {
-            writer.print("{d}", .{behind}) catch {};
-            i += "$behind".len;
-        } else if (std.mem.startsWith(u8, template[i..], "$count")) {
-            const count = if (ahead > 0) ahead else behind;
-            writer.print("{d}", .{count}) catch {};
-            i += "$count".len;
-        } else {
-            writer.writeByte(template[i]) catch {};
-            i += 1;
-        }
-    }
+    formatter.formatTemplateWriter(writer, template, formatter.FormatContext(CountVar){
+        .vars = &.{
+            .{ .name = .ahead, .value = ahead_str },
+            .{ .name = .behind, .value = behind_str },
+            .{ .name = .count, .value = count_str },
+        },
+    }) catch {};
     return buf[0..pos];
 }
 
@@ -170,11 +171,9 @@ pub fn render(
     const io = ctx.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir = ctx.git_dir orelse git_utils.findGitDir(io, ctx.cwd, &git_dir_buf) orelse return;
+    const git_dir = ctx.getGitDir(io, &git_dir_buf) orelse return;
 
-    var head_buf: [512]u8 = undefined;
-    const branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf);
-    const info = git_utils.getGitStatusForDir(io, ctx.cwd, git_dir, branch);
+    const info = if (ctx.git_status) |st| st.* else git_utils.getGitStatusForDir(io, ctx.cwd, git_dir);
 
     // If nothing to report and no status symbols, return early
     if (!info.hasAnyStatus() and config.up_to_date.len == 0) return;
@@ -192,11 +191,13 @@ pub fn render(
             .{ .name = .all_status, .value = all_status_str },
             .{ .name = .ahead_behind, .value = ahead_behind_str },
             .{ .name = .up_to_date, .value = if (info.ahead == 0 and info.behind == 0) config.up_to_date else "" },
+            .{ .name = .conflicted, .value = if (info.conflicted) config.conflicted else "" },
             .{ .name = .stashed, .value = if (info.stashed) config.stashed else "" },
+            .{ .name = .deleted, .value = if (info.deleted) config.deleted else "" },
+            .{ .name = .renamed, .value = if (info.renamed) config.renamed else "" },
             .{ .name = .modified, .value = if (info.modified) config.modified else "" },
             .{ .name = .staged, .value = if (info.staged) config.staged else "" },
             .{ .name = .untracked, .value = if (info.untracked) config.untracked else "" },
-            .{ .name = .deleted, .value = if (info.deleted) config.deleted else "" },
         },
     });
 }
@@ -205,31 +206,26 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
     const io = dctx.prompt.io orelse return;
 
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const git_dir_opt = dctx.prompt.git_dir orelse git_utils.findGitDir(io, dctx.prompt.cwd, &git_dir_buf);
+    const git_dir_opt = dctx.prompt.getGitDir(io, &git_dir_buf);
 
     if (git_dir_opt == null) {
-        if (dctx.json) {
-            try writer.writeAll("{\"module\": \"git_status\", \"in_git_repo\": false}\n");
-        } else {
-            try writer.writeAll("⚡ Module: git_status\n  In Git Repo: false\n\n");
-        }
+        try git_utils.writeNotInGitRepo(writer, dctx.json, "git_status");
         return;
     }
 
     const git_dir = git_dir_opt.?;
-    var head_buf: [512]u8 = undefined;
-    const branch = git_utils.getGitBranchFromDir(io, git_dir, &head_buf);
-    const info = git_utils.getGitStatusForDir(io, dctx.prompt.cwd, git_dir, branch);
+    const info = if (dctx.prompt.git_status) |st| st.* else git_utils.getGitStatusForDir(io, dctx.prompt.cwd, git_dir);
 
     if (dctx.json) {
         try writer.print(
-            \\{{ "module": "git_status", "staged": {}, "modified": {}, "untracked": {}, "deleted": {}, "stashed": {}, "conflicted": {}, "ahead": {d}, "behind": {d} }}
+            \\{{ "module": "git_status", "staged": {}, "modified": {}, "untracked": {}, "deleted": {}, "renamed": {}, "stashed": {}, "conflicted": {}, "ahead": {d}, "behind": {d} }}
             \\
         , .{
             info.staged,
             info.modified,
             info.untracked,
             info.deleted,
+            info.renamed,
             info.stashed,
             info.conflicted,
             info.ahead,
@@ -242,6 +238,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
             \\  Modified (!):   {}
             \\  Untracked (?):  {}
             \\  Deleted (✘):    {}
+            \\  Renamed (»):    {}
             \\  Stashed ($):    {}
             \\  Conflicted (=): {}
             \\  Ahead (⇡):      {d}
@@ -252,6 +249,7 @@ pub fn debug(writer: anytype, dctx: DebugContext) !void {
             info.modified,
             info.untracked,
             info.deleted,
+            info.renamed,
             info.stashed,
             info.conflicted,
             info.ahead,
@@ -285,11 +283,12 @@ test "unit: formatAllStatus and formatAheadBehind" {
     try std.testing.expectEqualStrings("⇡1⇣2", formatAheadBehind(&ab_buf, custom_cfg, 1, 2));
 }
 
-test "unit: formatAllStatus with conflicted, deleted flags" {
+test "unit: formatAllStatus with conflicted, deleted, renamed flags" {
     const cfg = GitStatusConfig{};
     const info = git_utils.GitStatusInfo{
         .conflicted = true,
         .deleted = true,
+        .renamed = true,
         .modified = true,
         .staged = true,
         .untracked = true,
@@ -299,10 +298,10 @@ test "unit: formatAllStatus with conflicted, deleted flags" {
     var buf: [128]u8 = undefined;
     const status_str = formatAllStatus(&buf, cfg, info);
 
-    try std.testing.expectEqualStrings("=$✘!+?", status_str);
+    try std.testing.expectEqualStrings("=$✘»!+?", status_str);
 }
 
-pub const Harness = @import("../../../tests/harness.zig").Harness;
+const Harness = @import("../../../tests/harness.zig").Harness;
 
 test "integration: git_status renders nothing in clean repo" {
     var h = try Harness.create(std.testing.allocator);
@@ -446,7 +445,7 @@ test "integration: git_status with deleted file shows deleted symbol" {
     try Harness.expectVisibleText(out, "✘");
 }
 
-test "integration: git_status with renamed file shows staged symbol" {
+test "integration: git_status with renamed file shows renamed symbol" {
     var h = try Harness.create(std.testing.allocator);
     defer h.destroy();
 
@@ -462,7 +461,7 @@ test "integration: git_status with renamed file shows staged symbol" {
     );
 
     const out = try h.collectAllShells();
-    try Harness.expectVisibleText(out, "+");
+    try Harness.expectVisibleText(out, "»");
 }
 
 test "integration: git_status with stashed changes shows stash symbol" {
@@ -625,6 +624,7 @@ test "integration: git_status combined multiple flags simultaneously" {
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "$"); // stashed
     try Harness.expectVisibleText(out, "✘"); // deleted
+    try Harness.expectVisibleText(out, "»"); // renamed
     try Harness.expectVisibleText(out, "!"); // modified
     try Harness.expectVisibleText(out, "+"); // staged
     try Harness.expectVisibleText(out, "?"); // untracked
@@ -980,6 +980,49 @@ test "integration: git_status diverged custom template with arrows" {
 
     const out = try h.collectAllShells();
     try Harness.expectVisibleText(out, "⇡2⇣3");
+}
+
+test "integration: git_status behind count after single fetch with multiple commits and gc" {
+    var h = try Harness.create(std.testing.allocator);
+    defer h.destroy();
+
+    try h.setupGit();
+    try h.writeFile("base.txt", "base");
+    try h.git(&.{ "add", "." });
+    try h.git(&.{ "commit", "-m", "base" });
+
+    const remote_dir = try std.fmt.allocPrint(h.arena.allocator(), "{s}_remote.git", .{h.tmp_dir});
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, remote_dir) catch {};
+
+    try h.git(&.{ "init", "--bare", remote_dir });
+    try h.git(&.{ "remote", "add", "origin", remote_dir });
+    try h.git(&.{ "push", "-u", "origin", "master" });
+
+    // Push 4 commits from a temporary branch to origin/master, then fetch once on master
+    try h.git(&.{ "checkout", "-b", "temp_ahead" });
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        var msg_buf: [32]u8 = undefined;
+        const msg = try std.fmt.bufPrint(&msg_buf, "incoming {d}", .{i});
+        try h.git(&.{ "commit", "--allow-empty", "-m", msg });
+    }
+    try h.git(&.{ "push", "origin", "temp_ahead:master" });
+    try h.git(&.{ "checkout", "master" });
+    try h.git(&.{ "branch", "-D", "temp_ahead" });
+    try h.git(&.{ "fetch", "origin" });
+
+    try h.setConfig(
+        \\format = "$git_status"
+        \\add_newline = false
+    );
+
+    const out_loose = try h.collectAllShells();
+    try Harness.expectVisibleText(out_loose, "⇣4");
+
+    // Pack all objects and prune loose objects to verify packfile (.idx/.pack) traversal
+    try h.git(&.{ "gc", "--prune=now" });
+    const out_packed = try h.collectAllShells();
+    try Harness.expectVisibleText(out_packed, "⇣4");
 }
 
 test "integration: git_status deep nested directories with partial ignores and untracked files" {

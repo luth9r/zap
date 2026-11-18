@@ -5,14 +5,16 @@ pub const HOOK_TEMPLATE = "eval \"$({s} init zsh)\"";
 pub const SCRIPT =
     \\# Zap prompt integration for Zsh
     \\
+    \\zmodload zsh/datetime 2>/dev/null
     \\_zap_start_time=""
     \\_zap_first_prompt="1"
     \\
     \\_zap_preexec() {
     \\    _zap_start_time="${EPOCHREALTIME:-$EPOCHSECONDS}"
-    \\    if [[ "$1" == "clear" || "$1" == "cls" || "$1" == "reset" ]]; then
-    \\        _zap_first_prompt="1"
-    \\    fi
+    \\    _zap_start_time="${_zap_start_time/,/.}"
+    \\    case "$1" in
+    \\        clear|cls|reset|"clear "*|"cls "*|"reset "*) _zap_first_prompt="1" ;;
+    \\    esac
     \\}
     \\
     \\_zap_precmd() {
@@ -21,6 +23,7 @@ pub const SCRIPT =
     \\
     \\    if [[ -n "$_zap_start_time" ]]; then
     \\        local end_time="${EPOCHREALTIME:-$EPOCHSECONDS}"
+    \\        end_time="${end_time/,/.}"
     \\        if [[ "$_zap_start_time" == *"."* && "$end_time" == *"."* ]]; then
     \\            local start_s="${_zap_start_time%.*}"
     \\            local start_us="${_zap_start_time#*.}"

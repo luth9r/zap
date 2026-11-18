@@ -16,7 +16,9 @@ pub const render = RustModule.render;
 pub const buffer_size = RustModule.buffer_size;
 pub const debug = RustModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = RustModule.detect;
+pub const module_name = RustModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: rust satisfies module contract" {
     comptime module.validateModule(RustModule);

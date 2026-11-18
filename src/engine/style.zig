@@ -32,17 +32,23 @@ pub const ModifierKind = enum {
     reset,
 };
 
+const modifier_map = std.StaticStringMapWithEql(ModifierKind, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+    .{ "bold", .bold },
+    .{ "dimmed", .dimmed },
+    .{ "dim", .dimmed },
+    .{ "italic", .italic },
+    .{ "underline", .underline },
+    .{ "underlined", .underline },
+    .{ "blink", .blink },
+    .{ "inverted", .inverted },
+    .{ "invert", .inverted },
+    .{ "hidden", .hidden },
+    .{ "strikethrough", .strikethrough },
+    .{ "reset", .reset },
+});
+
 pub fn parseModifierToken(token: []const u8) ?ModifierKind {
-    if (std.ascii.eqlIgnoreCase(token, "bold")) return .bold;
-    if (std.ascii.eqlIgnoreCase(token, "dimmed") or std.ascii.eqlIgnoreCase(token, "dim")) return .dimmed;
-    if (std.ascii.eqlIgnoreCase(token, "italic")) return .italic;
-    if (std.ascii.eqlIgnoreCase(token, "underline") or std.ascii.eqlIgnoreCase(token, "underlined")) return .underline;
-    if (std.ascii.eqlIgnoreCase(token, "blink")) return .blink;
-    if (std.ascii.eqlIgnoreCase(token, "inverted") or std.ascii.eqlIgnoreCase(token, "invert")) return .inverted;
-    if (std.ascii.eqlIgnoreCase(token, "hidden")) return .hidden;
-    if (std.ascii.eqlIgnoreCase(token, "strikethrough")) return .strikethrough;
-    if (std.ascii.eqlIgnoreCase(token, "reset")) return .reset;
-    return null;
+    return modifier_map.get(token);
 }
 
 pub const Style = struct {
@@ -50,6 +56,61 @@ pub const Style = struct {
     bg: ColorType = .none,
     modifiers: Modifiers = .{},
     is_none: bool = false,
+
+    pub fn applyToken(self: *Style, token: []const u8) bool {
+        if (std.ascii.eqlIgnoreCase(token, "none")) {
+            self.is_none = true;
+            return true;
+        }
+
+        if (parseModifierToken(token)) |mod| {
+            switch (mod) {
+                .bold => self.modifiers.bold = true,
+                .dimmed => self.modifiers.dimmed = true,
+                .italic => self.modifiers.italic = true,
+                .underline => self.modifiers.underline = true,
+                .blink => self.modifiers.blink = true,
+                .inverted => self.modifiers.inverted = true,
+                .hidden => self.modifiers.hidden = true,
+                .strikethrough => self.modifiers.strikethrough = true,
+                .reset => self.modifiers.reset = true,
+            }
+            return true;
+        }
+
+        if (std.ascii.startsWithIgnoreCase(token, "fg:")) {
+            const color_val = token[3..];
+            if (std.ascii.eqlIgnoreCase(color_val, "none")) {
+                self.fg = .{ .ansi_16 = 39 };
+                return true;
+            }
+            if (parseColorToken(color_val, false)) |col| {
+                self.fg = col;
+                return true;
+            }
+            return false;
+        }
+
+        if (std.ascii.startsWithIgnoreCase(token, "bg:")) {
+            const color_val = token[3..];
+            if (std.ascii.eqlIgnoreCase(color_val, "none")) {
+                self.bg = .{ .ansi_16 = 49 };
+                return true;
+            }
+            if (parseColorToken(color_val, true)) |col| {
+                self.bg = col;
+                return true;
+            }
+            return false;
+        }
+
+        if (parseColorToken(token, false)) |col| {
+            self.fg = col;
+            return true;
+        }
+
+        return false;
+    }
 
     pub fn parse(raw_style: []const u8) Style {
         var style = Style{};
@@ -61,62 +122,15 @@ pub const Style = struct {
 
         var it = std.mem.tokenizeAny(u8, trimmed, " \t\r\n");
         while (it.next()) |token| {
-            if (std.ascii.eqlIgnoreCase(token, "none")) {
-                style.is_none = true;
-                continue;
-            }
-
-            if (parseModifierToken(token)) |mod| {
-                switch (mod) {
-                    .bold => style.modifiers.bold = true,
-                    .dimmed => style.modifiers.dimmed = true,
-                    .italic => style.modifiers.italic = true,
-                    .underline => style.modifiers.underline = true,
-                    .blink => style.modifiers.blink = true,
-                    .inverted => style.modifiers.inverted = true,
-                    .hidden => style.modifiers.hidden = true,
-                    .strikethrough => style.modifiers.strikethrough = true,
-                    .reset => style.modifiers.reset = true,
-                }
-            } else if (std.mem.startsWith(u8, token, "fg:") or std.mem.startsWith(u8, token, "FG:")) {
-                const color_val = token[3..];
-                if (parseColorToken(color_val, false)) |col| {
-                    style.fg = col;
-                }
-            } else if (std.mem.startsWith(u8, token, "bg:") or std.mem.startsWith(u8, token, "BG:")) {
-                const color_val = token[3..];
-                if (std.ascii.eqlIgnoreCase(color_val, "none")) {
-                    style.bg = .{ .ansi_16 = 49 };
-                } else if (parseColorToken(color_val, true)) |col| {
-                    style.bg = col;
-                }
-            } else {
-                // Default without prefix is foreground color
-                if (parseColorToken(token, false)) |col| {
-                    style.fg = col;
-                }
-            }
+            _ = style.applyToken(token);
         }
 
         return style;
     }
 
     pub fn isValidToken(token: []const u8) bool {
-        if (std.ascii.eqlIgnoreCase(token, "none")) return true;
-        if (parseModifierToken(token) != null) return true;
-
-        if (std.mem.startsWith(u8, token, "fg:") or std.mem.startsWith(u8, token, "FG:")) {
-            const color_val = token[3..];
-            if (std.ascii.eqlIgnoreCase(color_val, "none")) return true;
-            return parseColorToken(color_val, false) != null;
-        }
-        if (std.mem.startsWith(u8, token, "bg:") or std.mem.startsWith(u8, token, "BG:")) {
-            const color_val = token[3..];
-            if (std.ascii.eqlIgnoreCase(color_val, "none")) return true;
-            return parseColorToken(color_val, true) != null;
-        }
-
-        return parseColorToken(token, false) != null;
+        var dummy = Style{};
+        return dummy.applyToken(token);
     }
 
     pub fn validate(raw_style: []const u8) ?[]const u8 {
@@ -162,52 +176,41 @@ pub const Style = struct {
         return parseNamedColor(trimmed, is_bg);
     }
 
+    const named_fg_color_map = std.StaticStringMapWithEql(u8, std.static_string_map.eqlAsciiIgnoreCase).initComptime(.{
+        .{ "black", 30 },
+        .{ "red", 31 },
+        .{ "green", 32 },
+        .{ "yellow", 33 },
+        .{ "blue", 34 },
+        .{ "magenta", 35 },
+        .{ "purple", 35 },
+        .{ "cyan", 36 },
+        .{ "white", 37 },
+        .{ "gray", 90 },
+        .{ "grey", 90 },
+        .{ "bright-black", 90 },
+        .{ "bright_black", 90 },
+        .{ "bright-red", 91 },
+        .{ "bright_red", 91 },
+        .{ "bright-green", 92 },
+        .{ "bright_green", 92 },
+        .{ "bright-yellow", 93 },
+        .{ "bright_yellow", 93 },
+        .{ "bright-blue", 94 },
+        .{ "bright_blue", 94 },
+        .{ "bright-magenta", 95 },
+        .{ "bright_magenta", 95 },
+        .{ "bright-purple", 95 },
+        .{ "bright_purple", 95 },
+        .{ "bright-cyan", 96 },
+        .{ "bright_cyan", 96 },
+        .{ "bright-white", 97 },
+        .{ "bright_white", 97 },
+    });
+
     fn parseNamedColor(name: []const u8, is_bg: bool) ?ColorType {
-        if (name.len == 0) return null;
-        const first = std.ascii.toLower(name[0]);
-
-        switch (first) {
-            'b' => {
-                if (std.ascii.eqlIgnoreCase(name, "black")) return .{ .ansi_16 = if (is_bg) 40 else 30 };
-                if (std.ascii.eqlIgnoreCase(name, "blue")) return .{ .ansi_16 = if (is_bg) 44 else 34 };
-                if (std.ascii.startsWithIgnoreCase(name, "bright-") or std.ascii.startsWithIgnoreCase(name, "bright_")) {
-                    const sub = name[7..];
-                    if (std.ascii.eqlIgnoreCase(sub, "black")) return .{ .ansi_16 = if (is_bg) 100 else 90 };
-                    if (std.ascii.eqlIgnoreCase(sub, "red")) return .{ .ansi_16 = if (is_bg) 101 else 91 };
-                    if (std.ascii.eqlIgnoreCase(sub, "green")) return .{ .ansi_16 = if (is_bg) 102 else 92 };
-                    if (std.ascii.eqlIgnoreCase(sub, "yellow")) return .{ .ansi_16 = if (is_bg) 103 else 93 };
-                    if (std.ascii.eqlIgnoreCase(sub, "blue")) return .{ .ansi_16 = if (is_bg) 104 else 94 };
-                    if (std.ascii.eqlIgnoreCase(sub, "magenta") or std.ascii.eqlIgnoreCase(sub, "purple")) return .{ .ansi_16 = if (is_bg) 105 else 95 };
-                    if (std.ascii.eqlIgnoreCase(sub, "cyan")) return .{ .ansi_16 = if (is_bg) 106 else 96 };
-                    if (std.ascii.eqlIgnoreCase(sub, "white")) return .{ .ansi_16 = if (is_bg) 107 else 97 };
-                }
-            },
-            'r' => {
-                if (std.ascii.eqlIgnoreCase(name, "red")) return .{ .ansi_16 = if (is_bg) 41 else 31 };
-            },
-            'g' => {
-                if (std.ascii.eqlIgnoreCase(name, "green")) return .{ .ansi_16 = if (is_bg) 42 else 32 };
-                if (std.ascii.eqlIgnoreCase(name, "gray") or std.ascii.eqlIgnoreCase(name, "grey")) return .{ .ansi_16 = if (is_bg) 100 else 90 };
-            },
-            'y' => {
-                if (std.ascii.eqlIgnoreCase(name, "yellow")) return .{ .ansi_16 = if (is_bg) 43 else 33 };
-            },
-            'm' => {
-                if (std.ascii.eqlIgnoreCase(name, "magenta")) return .{ .ansi_16 = if (is_bg) 45 else 35 };
-            },
-            'p' => {
-                if (std.ascii.eqlIgnoreCase(name, "purple")) return .{ .ansi_16 = if (is_bg) 45 else 35 };
-            },
-            'c' => {
-                if (std.ascii.eqlIgnoreCase(name, "cyan")) return .{ .ansi_16 = if (is_bg) 46 else 36 };
-            },
-            'w' => {
-                if (std.ascii.eqlIgnoreCase(name, "white")) return .{ .ansi_16 = if (is_bg) 47 else 37 };
-            },
-            else => {},
-        }
-
-        return null;
+        const fg_code = named_fg_color_map.get(name) orelse return null;
+        return .{ .ansi_16 = if (is_bg) fg_code + 10 else fg_code };
     }
 
     /// Note: used exclusively for unit tests. In runtime, toAnsiBuf is used instead.
@@ -220,52 +223,25 @@ pub const Style = struct {
     }
 
     fn writeColorCode(buf: []u8, pos: *usize, color: ColorType, is_bg: bool, has_prev: *bool) ?void {
-        switch (color) {
-            .none => {},
-            .ansi_16 => |code| {
-                if (has_prev.*) {
-                    if (pos.* >= buf.len) return null;
-                    buf[pos.*] = ';';
-                    pos.* += 1;
-                }
-                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d}", .{code}) catch return null;
-                pos.* += formatted.len;
-                has_prev.* = true;
-            },
-            .ansi_256 => |code| {
-                if (has_prev.*) {
-                    if (pos.* >= buf.len) return null;
-                    buf[pos.*] = ';';
-                    pos.* += 1;
-                }
-                const prefix: u8 = if (is_bg) 48 else 38;
-                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d};5;{d}", .{ prefix, code }) catch return null;
-                pos.* += formatted.len;
-                has_prev.* = true;
-            },
-            .rgb => |rgb| {
-                if (has_prev.*) {
-                    if (pos.* >= buf.len) return null;
-                    buf[pos.*] = ';';
-                    pos.* += 1;
-                }
-                const prefix: u8 = if (is_bg) 48 else 38;
-                const formatted = std.fmt.bufPrint(buf[pos.*..], "{d};2;{d};{d};{d}", .{ prefix, rgb.r, rgb.g, rgb.b }) catch return null;
-                pos.* += formatted.len;
-                has_prev.* = true;
-            },
+        if (color == .none) return;
+        if (has_prev.*) {
+            if (pos.* >= buf.len) return null;
+            buf[pos.*] = ';';
+            pos.* += 1;
         }
+        const prefix: u8 = if (is_bg) 48 else 38;
+        const formatted = switch (color) {
+            .none => unreachable,
+            .ansi_16 => |code| std.fmt.bufPrint(buf[pos.*..], "{d}", .{code}) catch return null,
+            .ansi_256 => |code| std.fmt.bufPrint(buf[pos.*..], "{d};5;{d}", .{ prefix, code }) catch return null,
+            .rgb => |rgb| std.fmt.bufPrint(buf[pos.*..], "{d};2;{d};{d};{d}", .{ prefix, rgb.r, rgb.g, rgb.b }) catch return null,
+        };
+        pos.* += formatted.len;
+        has_prev.* = true;
     }
 
     pub fn toAnsiBuf(self: Style, buf: []u8) ?[]const u8 {
         if (self.is_none) return buf[0..0];
-
-        const has_any = self.modifiers.reset or self.modifiers.bold or self.modifiers.dimmed or
-            self.modifiers.italic or self.modifiers.underline or self.modifiers.blink or
-            self.modifiers.inverted or self.modifiers.hidden or self.modifiers.strikethrough or
-            self.fg != .none or self.bg != .none;
-
-        if (!has_any) return buf[0..0];
 
         var pos: usize = 0;
         const prefix = "\x1b[";
@@ -303,6 +279,8 @@ pub const Style = struct {
 
         writeColorCode(buf, &pos, self.fg, false, &has_prev) orelse return null;
         writeColorCode(buf, &pos, self.bg, true, &has_prev) orelse return null;
+
+        if (!has_prev) return buf[0..0];
 
         if (pos >= buf.len) return null;
         buf[pos] = 'm';

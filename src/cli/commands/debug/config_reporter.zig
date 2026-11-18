@@ -4,47 +4,39 @@ const context = @import("../../../engine/context.zig");
 const config_mod = @import("../../../config/config.zig");
 const toml_parser = @import("../../../config/toml_parser.zig");
 const prompt_engine = @import("../../../engine/prompt.zig");
+const fs = @import("../../../utils/fs.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 const DebugContext = context.DebugContext;
 
 pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const config_path_opt = toml_parser.resolveExistingConfigPath(init.io, &path_buf, init.environ_map);
+    const config_exists = if (config_path_opt) |p| fs.fileExists(init.io, p) else false;
 
     var config = config_mod.defaultConfig();
     var config_file_buf: [64 * 1024]u8 = undefined;
     var file_size: usize = 0;
 
-    if (config_path_opt) |config_path| {
-        const file = if (std.fs.path.isAbsolute(config_path))
-            std.Io.Dir.openFileAbsolute(init.io, config_path, .{}) catch null
-        else
-            std.Io.Dir.cwd().openFile(init.io, config_path, .{}) catch null;
-
-        if (file) |f| {
-            var handle = f;
-            defer handle.close(init.io);
-            var stream_buf: [4096]u8 = undefined;
-            var reader = handle.reader(init.io, &stream_buf);
-            file_size = reader.interface.readSliceShort(&config_file_buf) catch 0;
-            if (file_size > 0) {
-                toml_parser.parseToml(&config, config_file_buf[0..file_size]);
-            }
-        }
+    if (config_exists) {
+        file_size = toml_parser.loadConfigFromPath(init.io, config_path_opt.?, &config, &config_file_buf);
     }
 
     const active_mask = prompt_engine.computeActiveModulesMask(config.format) | prompt_engine.computeActiveModulesMask(config.right_format);
     const decls = @typeInfo(registry).@"struct".decls;
 
     if (dctx.json) {
+        var j_path: [std.fs.max_path_bytes]u8 = undefined;
+        var j_fmt: [1024]u8 = undefined;
+        var j_rfmt: [1024]u8 = undefined;
         try writer.print(
             \\{{ "config_path": {s}{s}{s}, "file_size": {d}, "format": "{s}", "right_format": "{s}", "add_newline": {}, "active_modules": [
         , .{
-            if (config_path_opt != null) "\"" else "",
-            if (config_path_opt) |p| p else "null",
-            if (config_path_opt != null) "\"" else "",
+            if (config_exists) "\"" else "",
+            if (config_exists) parse_utils.escapeJsonBuf(&j_path, config_path_opt.?) else "null",
+            if (config_exists) "\"" else "",
             file_size,
-            config.format,
-            config.right_format,
+            parse_utils.escapeJsonBuf(&j_fmt, config.format),
+            parse_utils.escapeJsonBuf(&j_rfmt, config.right_format),
             config.add_newline,
         });
 
@@ -82,7 +74,9 @@ pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugCont
                     const val = @field(mod_cfg, f.name);
                     if (f.type == []const u8) {
                         if (!first_f) try writer.writeAll(", ");
-                        try writer.print("\"{s}\": \"{s}\"", .{ f.name, val });
+                        try writer.print("\"{s}\": \"", .{f.name});
+                        try parse_utils.writeJsonEscaped(writer, val);
+                        try writer.writeByte('"');
                         first_f = false;
                     } else if (f.type == bool) {
                         if (!first_f) try writer.writeAll(", ");
@@ -118,7 +112,7 @@ pub fn printConfigDebug(init: std.process.Init, writer: anytype, dctx: DebugCont
             \\
         , .{
             if (dctx.verbose) " (Verbose Mode)" else "",
-            if (config_path_opt) |p| p else "Default built-in configuration (no file found)",
+            if (config_exists) config_path_opt.? else "Default built-in configuration (no file found)",
             file_size,
             config.add_newline,
             config.format,

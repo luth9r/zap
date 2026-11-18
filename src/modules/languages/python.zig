@@ -16,7 +16,9 @@ pub const render = PythonModule.render;
 pub const buffer_size = PythonModule.buffer_size;
 pub const debug = PythonModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = PythonModule.detect;
+pub const module_name = PythonModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: python satisfies module contract" {
     comptime module.validateModule(PythonModule);

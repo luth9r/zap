@@ -39,16 +39,32 @@ description: >-
    - Use `h.runShellScript(...)` for shell session tests instead of duplicating `PATH`/`HOME`/`spawn` boilerplate.
    - `Harness.setupGit()` clones a cached `--allow-empty` template repo (with `config.toml` in `.git/info/exclude`). Any test that overwrites `.git/info/exclude` MUST keep `config.toml` in it.
    - Keep `test "internal: cleanup git template"` in `harness.zig` — `src/tests/runner.zig` runs it in `defer` per worker.
-3. **Reuse Existing Helpers (No Duplicate Functions):**
-   - Before writing a new utility function, check if it already exists in the canonical module:
-     - **OS / Env / Paths / Streams / Time:** `src/utils/platform.zig` (`env.*`, `joinPath`, `joinParts`, `readStreamToBuf`, `spawnWithEnv`, `getLocalTime`, `fileExistsAbsolute`).
-     - **Home / CWD Resolution:** `src/engine/context.zig` (`resolveHomePath`, `resolveCwdPath`) — never redefine `resolveHomePath` in CLI commands.
-     - **Git Index Binary Readers:** `src/utils/git/index.zig` (`readExact`, `readByte`, `readEntryName`, `skipEntryPadding`).
-     - **ANSI Stripping & Test Assertions:** `src/tests/fixture.zig` (`Fixture.stripAnsi`) and `src/tests/assertions.zig`.
+3. **Reuse Existing Helpers (No Duplicate Functions — Never Reimplement):**
+   Before writing any utility, parser, file I/O, or git logic, reuse the canonical helpers:
+   - **OS / Env / Paths / Streams / Time** (`src/utils/platform.zig`):
+     - `env.*`, `isSep`, `pathStartsWith`, `pathEql`, `pathIsSubpath`, `joinPath`, `joinParts`, `fileExistsAbsolute`, `readStreamToBuf`, `spawnWithEnv`, `getLocalTime`, `testTempSubdir`.
+   - **File I/O & Project Detection** (`src/utils/fs.zig`):
+     - `fileExists`, `readFileRaw`, `readSmallFile`, `writeFile`, `writeFileAbsolute`, `findFirstSubpath`, `anySubpathExists`, `findFirstExtensionFile`, `hasFileWithExtension`, `scanParentDirsForFiles`, `detectDetailed`.
+   - **Path Truncation** (`src/utils/path_utils.zig`):
+     - `writePath`, `formatPathBuf`, `formatPathTruncatedBuf`.
+   - **Template, JSON & ANSI Parsing** (`src/utils/parse_utils.zig`):
+     - `extractVarName`, `findMatchingDelimiter`, `skipAnsiOrShellMarker`, `escapeJsonBuf`, `writeJsonEscaped`.
+   - **TOML Config & Validation** (`src/config/toml_parser.zig`):
+     - `loadConfigFromPath`, `loadConfigFile`, `splitKeyVal`, `unquoteRaw`, `stripInlineComment`, `extractMultilineValue`, `InlineTableIterator`, `resolveExistingConfigPath`.
+   - **Prompt Engine & Context** (`src/engine/prompt.zig`, `src/engine/context.zig`):
+     - `resolveHomePath`, `resolveCwdPath`, `PromptContext.getGitDir`, `computeActiveModulesMask`, `resolveGitContext`, `renderActiveModules` (with `ModuleBuffers`).
+   - **Git Subsystem** (`src/utils/git_utils.zig` -> `src/utils/git/*`):
+     - **Single-process status**: `resolveBranch`, `resolveCommit`, `getGitStatusForDir`, `collectDetailedGitFiles` (all backed by `runGitStatusPorcelain` with `git status --porcelain=v2 --branch --show-stash`).
+     - **Repo/Worktree paths**: `findGitDir`, `findRepoRoot`, `gitDirToCommonDir`, `resolveRepoRoot`, `gitDirToRepoRoot`.
+     - **Tags / State / Index / Debug**: `findTagForHash` (`git describe --tags --exact-match`), `getGitState`, `getIndexEntryCount` (`.git/index` header), `writeNotInGitRepo`.
+   - **Test Harness & Assertions** (`src/tests/harness.zig`, `src/tests/fixture.zig`, `src/tests/assertions.zig`):
+     - `Fixture.stripAnsi`, `Fixture.assertValidShellAnsi`, `assertions.*`, `Harness.runShellScript`, `Harness.collectAllShells`.
    - Always run `zig fmt --check src/ build.zig` (or `zig fmt src/ build.zig`) to keep Unix `LF` formatting.
-4. **Zig 0.16 idioms:**
-   - Use `@splat(null)` instead of `.{null} ** N` for array initialization to avoid false ZLS diagnostics.
-   - Use `std.Io.Dir` / `std.Io.File` APIs (`openDir`, `copyFile`, `createDirPathOpen`, `deleteTree`).
+4. **Zig 0.16 Paradigm & Idioms:**
+   - **Comptime reflection over `registry`:** Use `@typeInfo(registry).@"struct".decls`, `inline for`, and `std.meta.DeclEnum(modules)` (`ModuleVar`) instead of hardcoded module lists or runtime dispatch.
+   - **Comptime lookup tables over `if-else` chains:** Use `std.StaticStringMap` / `std.StaticStringMapWithEql(..., eqlAsciiIgnoreCase)` or `std.meta.stringToEnum` instead of `if (std.mem.eql(...))` chains.
+   - **Zero-heap stack buffers:** Use `BufferWriter` (`src/utils/buffer_writer.zig`) and fixed stack arrays in all render/debug paths; never allocate in `render()`.
+   - **Array init & Io:** Use `@splat(null)` instead of `.{null} ** N` for array initialization; use `std.Io.Dir` / `std.Io.File` APIs (`openDir`, `copyFile`, `createDirPathOpen`, `deleteTree`).
    - Watch for CRLF files on Windows if string-matching edits fail.
 
 ## New Shell Checklist

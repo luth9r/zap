@@ -16,7 +16,9 @@ pub const render = ZigLangModule.render;
 pub const buffer_size = ZigLangModule.buffer_size;
 pub const debug = ZigLangModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = ZigLangModule.detect;
+pub const module_name = ZigLangModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: zig_lang renders symbol when build.zig is present" {
     var h = try Harness.create(std.testing.allocator);

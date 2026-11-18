@@ -11,7 +11,7 @@
     },
     "format": {
       "type": "string",
-      "default": "$directory$character",
+      "default": "$directory$git_branch$git_commit$git_state$git_status$cmd_duration$character",
       "description": "Root prompt format string controlling module layout, inline styling blocks [content](style), and escaped characters (e.g. \\$ for literal '$')"
     },
     "right_format": {
@@ -224,7 +224,7 @@
       "properties": {
         "format": {
           "type": "string",
-          "default": "([\\[$all_status$ahead_behind\\]]($style) )",
+          "default": "[[$all_status$ahead_behind]]($style) ",
           "description": "Format template for the git_status module"
         },
         "style": {
@@ -251,6 +251,11 @@
           "type": "string",
           "default": "✘",
           "description": "Symbol shown when files are deleted"
+        },
+        "renamed": {
+          "type": "string",
+          "default": "»",
+          "description": "Symbol shown when files are renamed"
         },
         "stashed": {
           "type": "string",
@@ -348,7 +353,7 @@
         }
       }
     },
-    "os" : {
+    "os": {
       "type": "object",
       "description": "Current system logo indicator",
       "additionalProperties": false,
@@ -359,7 +364,7 @@
           "description": "Format template for the os module"
         },
         "style": {
-          "type": "string",
+          "$ref": "#/definitions/Style",
           "default": "bold white",
           "description": "Style string for the os logo"
         },
@@ -372,6 +377,38 @@
           "type": "string",
           "default": "",
           "description": "Custom OS symbol override. If omitted or empty, automatically detected based on the current OS/distribution."
+        }
+      }
+    },
+    "time": {
+      "type": "object",
+      "description": "Current local time rendering configuration",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "default": "at [$time]($style) ",
+          "description": "Format template for the time module"
+        },
+        "style": {
+          "$ref": "#/definitions/Style",
+          "default": "bold yellow",
+          "description": "Style string for the time display"
+        },
+        "time_format": {
+          "type": "string",
+          "default": "%T",
+          "description": "Time format specification (supports %T, %R, %H, %I, %M, %S, %p, %%)"
+        },
+        "use_12hr": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to use 12-hour clock with AM/PM when expanding %T or %R"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disables the time module"
         }
       }
     },
@@ -503,16 +540,25 @@
         "cyan",
         "white",
         "bright-black",
+        "bright_black",
         "gray",
         "grey",
         "bright-red",
+        "bright_red",
         "bright-green",
+        "bright_green",
         "bright-yellow",
+        "bright_yellow",
         "bright-blue",
+        "bright_blue",
         "bright-magenta",
+        "bright_magenta",
         "bright-purple",
+        "bright_purple",
         "bright-cyan",
-        "bright-white"
+        "bright_cyan",
+        "bright-white",
+        "bright_white"
       ]
     }
   }

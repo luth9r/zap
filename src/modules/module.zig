@@ -1,6 +1,7 @@
 const std = @import("std");
 const formatter = @import("../engine/formatter.zig");
 const git_utils = @import("../utils/git_utils.zig");
+const parse_utils = @import("../utils/parse_utils.zig");
 const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 
 pub const PromptContext = @import("../engine/context.zig").PromptContext;
@@ -77,7 +78,8 @@ pub const LanguageSpec = struct {
 /// Generic builder creating a zero-allocation language / tool module from a specification.
 pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
     return struct {
-        pub const Var = enum { symbol, version, style };
+        pub const Var = enum { symbol, version };
+        pub const module_name: []const u8 = spec.name;
 
         pub const Config = struct {
             format: []const u8 = spec.default_format,
@@ -101,7 +103,8 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
             }
 
             // 3. Fast upward traversal: check manifest files in parent dirs up to git root (capped by max_scan_depth)
-            const repo_root = if (ctx.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const repo_root = if (ctx.git_dir) |git_dir| git_utils.resolveRepoRoot(io, ctx.cwd, git_dir, &repo_root_buf) else null;
             if (fs.scanParentDirsForFiles(io, ctx.cwd, ctx.home, repo_root, spec.files, spec.max_scan_depth)) {
                 return true;
             }
@@ -125,25 +128,28 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
                 .vars = &.{
                     .{ .name = .symbol, .value = config.symbol },
                     .{ .name = .version, .value = config.version },
-                    .{ .name = .style, .value = config.style },
                 },
             });
         }
 
         pub fn debug(writer: anytype, dctx: DebugContext) !void {
             const io = dctx.prompt.io orelse return;
-            const repo_root = if (dctx.prompt.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
+            var repo_root_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const repo_root = if (dctx.prompt.git_dir) |git_dir| git_utils.resolveRepoRoot(io, dctx.prompt.cwd, git_dir, &repo_root_buf) else null;
             const match_detail = fs.detectDetailed(io, dctx.prompt.cwd, dctx.prompt.home, repo_root, spec.files, spec.extensions, spec.max_scan_depth);
 
             if (dctx.json) {
+                var j_matched: [512]u8 = undefined;
+                var j_path: [std.fs.max_path_bytes]u8 = undefined;
+                var j_cwd: [std.fs.max_path_bytes]u8 = undefined;
                 try writer.print(
                     \\{{ "module": "{s}", "detected": {}, "verbose": {}, "matched": "{s}", "matched_path": "{s}", "depth": {d}, "files": [
                 , .{
                     spec.name,
                     match_detail.matched,
                     dctx.verbose,
-                    match_detail.getMatchedFile(),
-                    match_detail.getMatchedPath(),
+                    parse_utils.escapeJsonBuf(&j_matched, match_detail.getMatchedFile()),
+                    parse_utils.escapeJsonBuf(&j_path, match_detail.getMatchedPath()),
                     match_detail.depth,
                 });
                 for (spec.files, 0..) |file, idx| {
@@ -155,7 +161,7 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
                     if (idx > 0) try writer.writeAll(", ");
                     try writer.print("\"{s}\"", .{ext});
                 }
-                try writer.print("], \"cwd\": \"{s}\" }}\n", .{dctx.prompt.cwd});
+                try writer.print("], \"cwd\": \"{s}\" }}\n", .{parse_utils.escapeJsonBuf(&j_cwd, dctx.prompt.cwd)});
             } else {
                 try writer.print(
                     \\⚡ Module: {s}
@@ -185,113 +191,6 @@ pub fn GenericLanguageModule(comptime spec: LanguageSpec) type {
                 for (spec.extensions, 0..) |ext, idx| {
                     if (idx > 0) try writer.writeAll(", ");
                     try writer.print("{s}", .{ext});
-                }
-                try writer.writeAll("\n\n");
-            }
-        }
-    };
-}
-
-/// Specification for a file or directory presence module.
-pub const FileSpec = struct {
-    name: []const u8,
-    symbol: []const u8,
-    style: []const u8 = "bold cyan",
-    files: []const []const u8 = &.{},
-    default_format: []const u8 = "[$symbol]($style) ",
-    buffer_size: usize = 256,
-    // Maximum parent directory levels to traverse upwards (default = 8)
-    max_scan_depth: usize = 8,
-};
-
-/// Generic builder for file/presence-based prompt modules.
-pub fn GenericFileModule(comptime spec: FileSpec) type {
-    return struct {
-        pub const Var = enum { symbol, style };
-
-        pub const Config = struct {
-            format: []const u8 = spec.default_format,
-            symbol: []const u8 = spec.symbol,
-            style: []const u8 = spec.style,
-            disabled: bool = false,
-        };
-
-        pub const buffer_size: usize = spec.buffer_size;
-
-        pub fn detect(io: std.Io, ctx: PromptContext) bool {
-            if (fs.anySubpathExists(io, ctx.cwd, spec.files)) return true;
-            const repo_root = if (ctx.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
-            if (fs.scanParentDirsForFiles(io, ctx.cwd, ctx.home, repo_root, spec.files, spec.max_scan_depth)) {
-                return true;
-            }
-            return false;
-        }
-
-        pub fn render(
-            writer: anytype,
-            config: Config,
-            ctx: PromptContext,
-        ) !void {
-            if (config.disabled) return;
-            const io = ctx.io orelse return;
-
-            if (!detect(io, ctx)) return;
-
-            try formatter.formatTemplateWriter(writer, config.format, formatter.FormatContext(Var){
-                .style = config.style,
-                .shell = ctx.shell,
-                .vars = &.{
-                    .{ .name = .symbol, .value = config.symbol },
-                    .{ .name = .style, .value = config.style },
-                },
-            });
-        }
-
-        pub fn debug(writer: anytype, dctx: DebugContext) !void {
-            const io = dctx.prompt.io orelse return;
-            const repo_root = if (dctx.prompt.git_dir) |git_dir| git_utils.gitDirToRepoRoot(git_dir) else null;
-            const match_detail = fs.detectDetailed(io, dctx.prompt.cwd, dctx.prompt.home, repo_root, spec.files, &.{}, spec.max_scan_depth);
-
-            if (dctx.json) {
-                try writer.print(
-                    \\{{ "module": "{s}", "detected": {}, "verbose": {}, "matched": "{s}", "matched_path": "{s}", "depth": {d}, "files": [
-                , .{
-                    spec.name,
-                    match_detail.matched,
-                    dctx.verbose,
-                    match_detail.getMatchedFile(),
-                    match_detail.getMatchedPath(),
-                    match_detail.depth,
-                });
-                for (spec.files, 0..) |file, idx| {
-                    if (idx > 0) try writer.writeAll(", ");
-                    try writer.print("\"{s}\"", .{file});
-                }
-                try writer.print("], \"cwd\": \"{s}\" }}\n", .{dctx.prompt.cwd});
-            } else {
-                try writer.print(
-                    \\⚡ Module: {s}
-                    \\  Detected:   {}
-                , .{ spec.name, match_detail.matched });
-
-                if (dctx.verbose or match_detail.matched) {
-                    if (match_detail.matched) {
-                        try writer.print(
-                            \\
-                            \\  Matched:    {s} (depth: {d})
-                            \\  Path:       {s}
-                        , .{ match_detail.getMatchedFile(), match_detail.depth, match_detail.getMatchedPath() });
-                    }
-                }
-
-                try writer.print(
-                    \\
-                    \\  CWD:        {s}
-                    \\  Files:      
-                , .{dctx.prompt.cwd});
-                for (spec.files, 0..) |file, idx| {
-                    if (idx > 0) try writer.writeAll(", ");
-                    try writer.print("{s}", .{file});
                 }
                 try writer.writeAll("\n\n");
             }

@@ -14,6 +14,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_mod.addOptions("build_options", options);
+    root_mod.addAnonymousImport("zap_schema_json", .{
+        .root_source_file = b.path("zap.schema.json"),
+    });
 
     const exe = b.addExecutable(.{
         .name = "zap",

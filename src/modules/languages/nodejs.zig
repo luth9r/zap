@@ -16,7 +16,9 @@ pub const render = NodejsModule.render;
 pub const buffer_size = NodejsModule.buffer_size;
 pub const debug = NodejsModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = NodejsModule.detect;
+pub const module_name = NodejsModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: nodejs satisfies module contract" {
     comptime module.validateModule(NodejsModule);

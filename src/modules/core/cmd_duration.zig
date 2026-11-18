@@ -130,7 +130,7 @@ test "unit: formatDurationBuf various ranges" {
     try std.testing.expectEqualStrings("1d 2h 3m 4s", formatDurationBuf(&buf, 93784000, false).?);
 }
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "integration: cmd_duration appears above min_time threshold" {
     var h = try Harness.create(std.testing.allocator);

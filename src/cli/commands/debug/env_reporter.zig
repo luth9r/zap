@@ -2,40 +2,16 @@ const std = @import("std");
 const context = @import("../../../engine/context.zig");
 const toml_parser = @import("../../../config/toml_parser.zig");
 const install = @import("../../../init/install.zig");
+const fs = @import("../../../utils/fs.zig");
+const parse_utils = @import("../../../utils/parse_utils.zig");
 const DebugContext = context.DebugContext;
 
-fn escapeJson(buf: []u8, input: []const u8) []const u8 {
-    var pos: usize = 0;
-    for (input) |c| {
-        if (c == '\\' or c == '"') {
-            if (pos + 2 > buf.len) break;
-            buf[pos] = '\\';
-            buf[pos + 1] = c;
-            pos += 2;
-        } else {
-            if (pos + 1 > buf.len) break;
-            buf[pos] = c;
-            pos += 1;
-        }
-    }
-    return buf[0..pos];
-}
+const escapeJson = parse_utils.escapeJsonBuf;
 
 fn checkFileContains(io: std.Io, path: []const u8, needle: []const u8) bool {
     var buf: [16384]u8 = undefined;
-    const file = if (std.fs.path.isAbsolute(path))
-        std.Io.Dir.openFileAbsolute(io, path, .{}) catch null
-    else
-        std.Io.Dir.cwd().openFile(io, path, .{}) catch null;
-    if (file) |f| {
-        var handle = f;
-        defer handle.close(io);
-        var stream_buf: [4096]u8 = undefined;
-        var reader = handle.reader(io, &stream_buf);
-        const bytes_read = reader.interface.readSliceShort(&buf) catch 0;
-        if (bytes_read > 0) {
-            return std.mem.indexOf(u8, buf[0..bytes_read], needle) != null;
-        }
+    if (fs.readSmallFile(io, path, &buf)) |content| {
+        return std.mem.indexOf(u8, content, needle) != null;
     }
     return false;
 }
@@ -43,6 +19,14 @@ fn checkFileContains(io: std.Io, path: []const u8, needle: []const u8) bool {
 const HookStatus = struct {
     rc: []const u8,
     installed: bool,
+};
+
+const AllHooksStatus = struct {
+    bash: HookStatus,
+    zsh: HookStatus,
+    fish: HookStatus,
+    pwsh: HookStatus,
+    cmd: HookStatus,
 };
 
 fn inspectShellHook(
@@ -62,6 +46,20 @@ fn inspectShellHook(
     };
     const installed = checkFileContains(io, rc, init_needle) or checkFileContains(io, rc, "zap prompt");
     return .{ .rc = rc, .installed = installed };
+}
+
+fn inspectAllShellHooks(
+    io: std.Io,
+    home: []const u8,
+    bufs: *[5][std.fs.max_path_bytes]u8,
+) AllHooksStatus {
+    return .{
+        .bash = inspectShellHook(io, .bash, home, &bufs[0]),
+        .zsh = inspectShellHook(io, .zsh, home, &bufs[1]),
+        .fish = inspectShellHook(io, .fish, home, &bufs[2]),
+        .pwsh = inspectShellHook(io, .powershell, home, &bufs[3]),
+        .cmd = inspectShellHook(io, .cmd, home, &bufs[4]),
+    };
 }
 
 pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext) !void {
@@ -84,31 +82,10 @@ pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext
 
     var cfg_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const resolved_cfg_path = toml_parser.resolveExistingConfigPath(io, &cfg_path_buf, init.environ_map);
+    const cfg_exists = if (resolved_cfg_path) |rc| fs.fileExists(io, rc) else false;
 
-    var bash_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const bash = inspectShellHook(io, .bash, dctx.prompt.home, &bash_hook_path);
-    const bash_rc = bash.rc;
-    const bash_hook = bash.installed;
-
-    var zsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const zsh = inspectShellHook(io, .zsh, dctx.prompt.home, &zsh_hook_path);
-    const zsh_rc = zsh.rc;
-    const zsh_hook = zsh.installed;
-
-    var fish_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const fish = inspectShellHook(io, .fish, dctx.prompt.home, &fish_hook_path);
-    const fish_rc = fish.rc;
-    const fish_hook = fish.installed;
-
-    var pwsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const pwsh = inspectShellHook(io, .powershell, dctx.prompt.home, &pwsh_hook_path);
-    const pwsh_rc = pwsh.rc;
-    const pwsh_hook = pwsh.installed;
-
-    var cmd_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const cmd = inspectShellHook(io, .cmd, dctx.prompt.home, &cmd_hook_path);
-    const cmd_rc = cmd.rc;
-    const cmd_hook = cmd.installed;
+    var hook_path_bufs: [5][std.fs.max_path_bytes]u8 = undefined;
+    const hooks = inspectAllShellHooks(io, dctx.prompt.home, &hook_path_bufs);
 
     if (dctx.json) {
         var j_shell_env: [std.fs.max_path_bytes]u8 = undefined;
@@ -137,12 +114,12 @@ pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext
             if (resolved_cfg_path != null) "\"" else "",
             if (resolved_cfg_path) |rc| escapeJson(&j_rc, rc) else "null",
             if (resolved_cfg_path != null) "\"" else "",
-            resolved_cfg_path != null,
-            bash_hook,
-            zsh_hook,
-            fish_hook,
-            pwsh_hook,
-            cmd_hook,
+            cfg_exists,
+            hooks.bash.installed,
+            hooks.zsh.installed,
+            hooks.fish.installed,
+            hooks.pwsh.installed,
+            hooks.cmd.installed,
         });
     } else {
         try writer.print(
@@ -184,21 +161,21 @@ pub fn printEnvDebug(init: std.process.Init, writer: anytype, dctx: DebugContext
             if (zap_config_env) |zc| zc else "(not set - using default discovery)",
             shlvl,
             if (resolved_cfg_path) |rc| rc else "Default built-in configuration (no file found)",
-            if (bash_hook) "✔" else "·",
-            if (bash_hook) "Hook installed" else "Not installed",
-            bash_rc,
-            if (zsh_hook) "✔" else "·",
-            if (zsh_hook) "Hook installed" else "Not installed",
-            zsh_rc,
-            if (fish_hook) "✔" else "·",
-            if (fish_hook) "Hook installed" else "Not installed",
-            fish_rc,
-            if (pwsh_hook) "✔" else "·",
-            if (pwsh_hook) "Hook installed" else "Not installed",
-            pwsh_rc,
-            if (cmd_hook) "✔" else "·",
-            if (cmd_hook) "Hook installed" else "Not installed",
-            cmd_rc,
+            if (hooks.bash.installed) "✔" else "·",
+            if (hooks.bash.installed) "Hook installed" else "Not installed",
+            hooks.bash.rc,
+            if (hooks.zsh.installed) "✔" else "·",
+            if (hooks.zsh.installed) "Hook installed" else "Not installed",
+            hooks.zsh.rc,
+            if (hooks.fish.installed) "✔" else "·",
+            if (hooks.fish.installed) "Hook installed" else "Not installed",
+            hooks.fish.rc,
+            if (hooks.pwsh.installed) "✔" else "·",
+            if (hooks.pwsh.installed) "Hook installed" else "Not installed",
+            hooks.pwsh.rc,
+            if (hooks.cmd.installed) "✔" else "·",
+            if (hooks.cmd.installed) "Hook installed" else "Not installed",
+            hooks.cmd.rc,
         });
     }
 }
@@ -210,20 +187,13 @@ pub fn printShellDebug(init: std.process.Init, writer: anytype, dctx: DebugConte
     const shell_env = init.environ_map.get("SHELL") orelse "";
     const shell_name = if (shell_env.len > 0) std.fs.path.basename(shell_env) else "unknown";
 
-    var bash_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const bash = inspectShellHook(io, .bash, dctx.prompt.home, &bash_hook_path);
-
-    var zsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const zsh = inspectShellHook(io, .zsh, dctx.prompt.home, &zsh_hook_path);
-
-    var fish_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const fish = inspectShellHook(io, .fish, dctx.prompt.home, &fish_hook_path);
-
-    var pwsh_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const pwsh = inspectShellHook(io, .powershell, dctx.prompt.home, &pwsh_hook_path);
-
-    var cmd_hook_path: [std.fs.max_path_bytes]u8 = undefined;
-    const cmd = inspectShellHook(io, .cmd, dctx.prompt.home, &cmd_hook_path);
+    var hook_path_bufs: [5][std.fs.max_path_bytes]u8 = undefined;
+    const hooks = inspectAllShellHooks(io, dctx.prompt.home, &hook_path_bufs);
+    const bash = hooks.bash;
+    const zsh = hooks.zsh;
+    const fish = hooks.fish;
+    const pwsh = hooks.pwsh;
+    const cmd = hooks.cmd;
 
     if (dctx.json) {
         var j_shell_env: [std.fs.max_path_bytes]u8 = undefined;

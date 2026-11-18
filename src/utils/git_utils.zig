@@ -3,6 +3,7 @@ const std = @import("std");
 pub const git = @import("git/root.zig");
 
 // Re-export all declarations from git/root.zig
+pub const GitHeadInfo = git.GitHeadInfo;
 pub const GitStatusInfo = git.GitStatusInfo;
 pub const GitCommitResult = git.GitCommitResult;
 pub const GitStateType = git.GitStateType;
@@ -11,38 +12,22 @@ pub const GitStateResult = git.GitStateResult;
 pub const findGitDir = git.findGitDir;
 pub const findRepoRoot = git.findRepoRoot;
 pub const gitDirToRepoRoot = git.gitDirToRepoRoot;
+pub const gitDirToCommonDir = git.gitDirToCommonDir;
+pub const resolveRepoRoot = git.resolveRepoRoot;
 pub const parseGitDirPointer = git.parseGitDirPointer;
-pub const fileExists = git.fileExists;
-pub const anySubpathExists = git.anySubpathExists;
-pub const readSmallFile = git.readSmallFile;
-pub const writeFileAbsolute = git.writeFileAbsolute;
 
-pub const parseHeadContent = git.parseHeadContent;
-pub const getGitBranch = git.getGitBranch;
-pub const getGitBranchFromDir = git.getGitBranchFromDir;
-pub const getGitCommit = git.getGitCommit;
+pub const findTagForHash = git.findTagForHash;
 
 pub const getGitState = git.getGitState;
 
 pub const getGitStatus = git.getGitStatus;
 pub const getGitStatusForDir = git.getGitStatusForDir;
-pub const getAheadBehind = git.getAheadBehind;
-pub const scanGitIndex = git.scanGitIndex;
+pub const writeNotInGitRepo = git.writeNotInGitRepo;
+pub const resolveBranch = git.resolveBranch;
+pub const resolveCommit = git.resolveCommit;
+pub const getIndexEntryCount = git.getIndexEntryCount;
 pub const GitFileCollector = git.GitFileCollector;
 pub const collectDetailedGitFiles = git.collectDetailedGitFiles;
-
-test "unit: parseHeadContent on regular branch" {
-    const raw = "ref: refs/heads/main\n";
-    try std.testing.expectEqualStrings("main", parseHeadContent(raw).?);
-
-    const nested = "ref: refs/heads/feature/auth-v2\n";
-    try std.testing.expectEqualStrings("feature/auth-v2", parseHeadContent(nested).?);
-}
-
-test "unit: parseHeadContent on detached HEAD SHA-1" {
-    const raw = "4cd65cc6c714604db0f7a6f6df0b6b66a7620ce0\n";
-    try std.testing.expectEqualStrings("4cd65cc", parseHeadContent(raw).?);
-}
 
 test "unit: parseGitDirPointer worktree" {
     const raw = "gitdir: /home/user/project/.git/worktrees/feat\n";
@@ -88,9 +73,6 @@ test "unit: getGitStatus live repo execution" {
     var git_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const git_dir = findGitDir(io, cwd, &git_dir_buf) orelse return;
 
-    var head_buf: [512]u8 = undefined;
-    const branch = getGitBranch(io, cwd, &git_dir_buf, &head_buf);
-    const info = getGitStatus(io, git_dir, branch);
-
+    const info = getGitStatus(io, git_dir);
     _ = info;
 }

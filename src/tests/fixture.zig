@@ -7,6 +7,7 @@ const Shell = @import("../init/root.zig").Shell;
 const modules = @import("../modules/registry.zig");
 const prompt = @import("../engine/prompt.zig");
 const platform = @import("../utils/platform.zig");
+const parse_utils = @import("../utils/parse_utils.zig");
 
 pub const Fixture = struct {
     /// Renders any specific module into a buffer using given Config, Context, and Shell.
@@ -42,18 +43,8 @@ pub const Fixture = struct {
         var w: usize = 0;
         var i: usize = 0;
         while (i < text.len) {
-            if (text[i] == 0x1b and i + 1 < text.len and text[i + 1] == '[') {
-                i += 2;
-                while (i < text.len and text[i] != 'm') : (i += 1) {}
-                if (i < text.len and text[i] == 'm') i += 1;
-                continue;
-            }
-            if (text[i] == 0x01 or text[i] == 0x02) {
-                i += 1;
-                continue;
-            }
-            if (text[i] == '%' and i + 1 < text.len and (text[i + 1] == '{' or text[i + 1] == '}')) {
-                i += 2;
+            if (parse_utils.skipAnsiOrShellMarker(text, i)) |next_i| {
+                i = next_i;
                 continue;
             }
             buf[w] = text[i];

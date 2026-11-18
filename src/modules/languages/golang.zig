@@ -16,7 +16,9 @@ pub const render = GolangModule.render;
 pub const buffer_size = GolangModule.buffer_size;
 pub const debug = GolangModule.debug;
 
-pub const Harness = @import("../../tests/harness.zig").Harness;
+pub const detect = GolangModule.detect;
+pub const module_name = GolangModule.module_name;
+const Harness = @import("../../tests/harness.zig").Harness;
 
 test "unit: golang satisfies module contract" {
     comptime module.validateModule(GolangModule);

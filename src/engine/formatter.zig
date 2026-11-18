@@ -2,12 +2,16 @@ const std = @import("std");
 const testing = std.testing;
 const style_mod = @import("style.zig");
 const parse_utils = @import("../utils/parse_utils.zig");
+const BufferWriter = @import("../utils/buffer_writer.zig").BufferWriter;
 const extractVarName = parse_utils.extractVarName;
 
 pub fn Variable(comptime EnumType: type) type {
     return struct {
         name: EnumType,
         value: []const u8,
+        /// When true, dynamic untrusted text (e.g. directory paths, git branch/tag names)
+        /// is escaped for target shell prompt expansion (Bash `$`/`\``, Zsh `%`/`$`/`\``).
+        escape_shell: bool = false,
     };
 }
 
@@ -40,7 +44,52 @@ pub fn FormatContext(comptime EnumType: type) type {
             }
             return null;
         }
+
+        pub fn shouldEscapeShell(self: @This(), name_str: []const u8) bool {
+            if (std.mem.eql(u8, name_str, "style")) return false;
+            const name = std.meta.stringToEnum(EnumType, name_str) orelse return false;
+            for (self.vars) |v| {
+                if (v.name == name) {
+                    return v.escape_shell;
+                }
+            }
+            return false;
+        }
     };
+}
+
+/// Writes dynamic user text (paths, branch names, tags) escaping characters that trigger
+/// shell prompt command substitution or prompt escape sequences.
+pub fn writeShellSafeValue(writer: anytype, val: []const u8, shell: Shell) !void {
+    switch (shell) {
+        .bash => {
+            for (val, 0..) |c, idx| {
+                if (c == '$' or c == '`') {
+                    try writer.writeByte('\\');
+                    try writer.writeByte(c);
+                } else if (c == '\\' and idx + 1 < val.len and (val[idx + 1] == '$' or val[idx + 1] == '`' or val[idx + 1] == '\\')) {
+                    try writer.writeAll("\\\\");
+                } else {
+                    try writer.writeByte(c);
+                }
+            }
+        },
+        .zsh => {
+            for (val) |c| {
+                if (c == '%') {
+                    try writer.writeAll("%%");
+                } else if (c == '$' or c == '`') {
+                    try writer.writeByte('\\');
+                    try writer.writeByte(c);
+                } else {
+                    try writer.writeByte(c);
+                }
+            }
+        },
+        .fish, .powershell, .cmd, .generic => {
+            try writer.writeAll(val);
+        },
+    }
 }
 
 /// Formats a style template string using the provided variable context.
@@ -61,10 +110,11 @@ fn writeEscapedByte(writer: anytype, esc: u8) !void {
     }
 }
 
-pub fn formatTemplateWriter(
+fn renderTemplate(
     writer: anytype,
     template: []const u8,
     ctx: anytype,
+    comptime allow_styled_groups: bool,
 ) !void {
     var i: usize = 0;
     while (i < template.len) {
@@ -76,13 +126,13 @@ pub fn formatTemplateWriter(
         if (template[i] == '(') {
             if (parseConditionalGroup(template, i)) |cond| {
                 if (shouldRenderConditionalGroup(cond.inner, ctx)) {
-                    try formatTemplateWriter(writer, cond.inner, ctx);
+                    try renderTemplate(writer, cond.inner, ctx, allow_styled_groups);
                 }
                 i = cond.next_index;
                 continue;
             }
         }
-        if (template[i] == '[') {
+        if (allow_styled_groups and template[i] == '[') {
             if (parseStyledGroup(template, i)) |group| {
                 try renderStyledGroup(writer, group.content, group.style_spec, ctx);
                 i = group.next_index;
@@ -93,7 +143,15 @@ pub fn formatTemplateWriter(
             const var_name = extractVarName(template[i + 1 ..]);
             if (var_name.len > 0) {
                 if (ctx.get(var_name)) |val| {
-                    try writer.writeAll(val);
+                    if (comptime @hasDecl(@TypeOf(ctx), "shouldEscapeShell")) {
+                        if (ctx.shouldEscapeShell(var_name)) {
+                            try writeShellSafeValue(writer, val, ctx.shell);
+                        } else {
+                            try writer.writeAll(val);
+                        }
+                    } else {
+                        try writer.writeAll(val);
+                    }
                 }
                 i += 1 + var_name.len;
                 continue;
@@ -102,6 +160,14 @@ pub fn formatTemplateWriter(
         try writer.writeByte(template[i]);
         i += 1;
     }
+}
+
+pub fn formatTemplateWriter(
+    writer: anytype,
+    template: []const u8,
+    ctx: anytype,
+) !void {
+    try renderTemplate(writer, template, ctx, true);
 }
 
 /// Note: used exclusively for unit tests. In runtime, formatTemplateWriter is used with stack-based BufferWriter (zero heap allocations).
@@ -139,65 +205,24 @@ const StyledGroup = struct {
 };
 
 fn parseStyledGroup(template: []const u8, start_idx: usize) ?StyledGroup {
-    if (template[start_idx] != '[') return null;
-
-    // Find closing ']' taking escapes into account
-    var i: usize = start_idx + 1;
-    var bracket_depth: usize = 1;
-    var close_bracket_idx: ?usize = null;
-
-    while (i < template.len) {
-        if (template[i] == '\\' and i + 1 < template.len) {
-            i += 2;
-            continue;
-        }
-        if (template[i] == '[') {
-            bracket_depth += 1;
-        } else if (template[i] == ']') {
-            bracket_depth -= 1;
-            if (bracket_depth == 0) {
-                close_bracket_idx = i;
-                break;
-            }
-        }
-        i += 1;
-    }
-
-    const close_bracket = close_bracket_idx orelse return null;
-
-    // Must be immediately followed by '('
+    const close_bracket = parse_utils.findMatchingDelimiter(template, start_idx, '[', ']') orelse return null;
     if (close_bracket + 1 >= template.len or template[close_bracket + 1] != '(') {
         return null;
     }
-
-    // Find closing ')'
-    var j: usize = close_bracket + 2;
-    var paren_depth: usize = 1;
-    var close_paren_idx: ?usize = null;
-
-    while (j < template.len) {
-        if (template[j] == '\\' and j + 1 < template.len) {
-            j += 2;
-            continue;
-        }
-        if (template[j] == '(') {
-            paren_depth += 1;
-        } else if (template[j] == ')') {
-            paren_depth -= 1;
-            if (paren_depth == 0) {
-                close_paren_idx = j;
-                break;
-            }
-        }
-        j += 1;
-    }
-
-    const close_paren = close_paren_idx orelse return null;
+    const close_paren = parse_utils.findMatchingDelimiter(template, close_bracket + 1, '(', ')') orelse return null;
 
     return StyledGroup{
         .content = template[start_idx + 1 .. close_bracket],
         .style_spec = template[close_bracket + 2 .. close_paren],
         .next_index = close_paren + 1,
+    };
+}
+
+fn zeroWidthWrapperOverhead(shell: Shell) usize {
+    return switch (shell) {
+        .bash => 2,
+        .zsh => 4,
+        .fish, .powershell, .cmd, .generic => 0,
     };
 }
 
@@ -226,16 +251,40 @@ fn renderStyledGroup(
     else
         style_mod.renderStyleBuf(&style_buf, resolved_style) orelse "";
 
+    const reset_seq = "\x1b[0m";
+    const wrapper_ovh = zeroWidthWrapperOverhead(ctx.shell);
+    const open_needed = if (style_ansi.len > 0) style_ansi.len + wrapper_ovh else 0;
+    const close_needed = if (style_ansi.len > 0) reset_seq.len + wrapper_ovh else 0;
+
+    if (comptime @TypeOf(writer) == BufferWriter) {
+        if (style_ansi.len > 0 and writer.remaining() < open_needed + close_needed) {
+            // Not enough space for both opening and closing ANSI tags; write plain content
+            try renderGroupContent(writer, content_raw, ctx);
+            return;
+        }
+        if (style_ansi.len > 0) {
+            try writeZeroWidthAnsi(writer, style_ansi, ctx.shell);
+            const reserved_writer = BufferWriter.init(writer.buf[0 .. writer.buf.len - close_needed], writer.pos);
+            try renderGroupContent(reserved_writer, content_raw, ctx);
+            try writeZeroWidthAnsi(writer, reset_seq, ctx.shell);
+            return;
+        }
+    }
+
     if (style_ansi.len > 0)
         try writeZeroWidthAnsi(writer, style_ansi, ctx.shell);
 
     try renderGroupContent(writer, content_raw, ctx);
 
     if (style_ansi.len > 0)
-        try writeZeroWidthAnsi(writer, "\x1b[0m", ctx.shell);
+        try writeZeroWidthAnsi(writer, reset_seq, ctx.shell);
 }
 
 pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !void {
+    if (comptime @TypeOf(writer) == BufferWriter) {
+        const needed = ansi_seq.len + zeroWidthWrapperOverhead(shell);
+        if (writer.remaining() < needed) return;
+    }
     switch (shell) {
         .bash => {
             try writer.writeByte('\x01');
@@ -253,48 +302,68 @@ pub fn writeZeroWidthAnsi(writer: anytype, ansi_seq: []const u8, shell: Shell) !
     }
 }
 
-fn isGroupContentEmpty(raw: []const u8, ctx: anytype) bool {
+const GroupInspection = struct {
+    has_var: bool = false,
+    has_non_empty_var: bool = false,
+    has_literal: bool = false,
+};
+
+fn inspectGroupVars(raw: []const u8, ctx: anytype) GroupInspection {
+    var res = GroupInspection{};
     var i: usize = 0;
-    var has_var = false;
-    var has_non_empty_var = false;
-    var has_literal = false;
 
     while (i < raw.len) {
         if (raw[i] == '\\' and i + 1 < raw.len) {
-            has_literal = true;
+            res.has_literal = true;
             i += 2;
             continue;
         }
         if (raw[i] == '(') {
             if (parseConditionalGroup(raw, i)) |cond| {
-                if (shouldRenderConditionalGroup(cond.inner, ctx) and !isGroupContentEmpty(cond.inner, ctx)) {
-                    has_non_empty_var = true;
+                const sub = inspectGroupVars(cond.inner, ctx);
+                if (!sub.has_var or sub.has_non_empty_var) {
+                    res.has_non_empty_var = true;
                 } else {
-                    has_var = true;
+                    res.has_var = true;
                 }
                 i = cond.next_index;
+                continue;
+            }
+        }
+        if (raw[i] == '[') {
+            if (parseStyledGroup(raw, i)) |group| {
+                res.has_var = true;
+                if (!isGroupContentEmpty(group.content, ctx)) {
+                    res.has_non_empty_var = true;
+                }
+                i = group.next_index;
                 continue;
             }
         }
         if (raw[i] == '$') {
             const var_name = extractVarName(raw[i + 1 ..]);
             if (var_name.len > 0) {
-                has_var = true;
+                res.has_var = true;
                 if (ctx.get(var_name)) |val| {
-                    if (val.len > 0) has_non_empty_var = true;
+                    if (val.len > 0) res.has_non_empty_var = true;
                 }
                 i += 1 + var_name.len;
                 continue;
             }
         }
-        has_literal = true;
+        res.has_literal = true;
         i += 1;
     }
 
-    if (has_var) {
-        return !has_non_empty_var;
+    return res;
+}
+
+fn isGroupContentEmpty(raw: []const u8, ctx: anytype) bool {
+    const info = inspectGroupVars(raw, ctx);
+    if (info.has_var) {
+        return !info.has_non_empty_var;
     }
-    return !has_literal;
+    return !info.has_literal;
 }
 
 fn renderGroupContent(
@@ -302,77 +371,12 @@ fn renderGroupContent(
     raw: []const u8,
     ctx: anytype,
 ) !void {
-    var i: usize = 0;
-    while (i < raw.len) {
-        if (raw[i] == '\\' and i + 1 < raw.len) {
-            try writeEscapedByte(writer, raw[i + 1]);
-            i += 2;
-            continue;
-        }
-
-        // Conditional group: (content with $var)
-        if (raw[i] == '(') {
-            if (parseConditionalGroup(raw, i)) |cond| {
-                if (shouldRenderConditionalGroup(cond.inner, ctx)) {
-                    try renderGroupContent(writer, cond.inner, ctx);
-                }
-                i = cond.next_index;
-                continue;
-            }
-        }
-
-        if (raw[i] == '$') {
-            const var_name = extractVarName(raw[i + 1 ..]);
-            if (var_name.len > 0) {
-                if (ctx.get(var_name)) |val| {
-                    try writer.writeAll(val);
-                }
-                i += 1 + var_name.len;
-                continue;
-            }
-        }
-
-        try writer.writeByte(raw[i]);
-        i += 1;
-    }
+    try renderTemplate(writer, raw, ctx, false);
 }
 
 fn shouldRenderConditionalGroup(inner: []const u8, ctx: anytype) bool {
-    var has_var = false;
-    var all_vars_empty = true;
-    var i: usize = 0;
-    while (i < inner.len) {
-        if (inner[i] == '\\' and i + 1 < inner.len) {
-            i += 2;
-            continue;
-        }
-        if (inner[i] == '[') {
-            if (parseStyledGroup(inner, i)) |group| {
-                has_var = true;
-                if (!isGroupContentEmpty(group.content, ctx)) {
-                    all_vars_empty = false;
-                }
-                i = group.next_index;
-                continue;
-            }
-        }
-        if (inner[i] == '$') {
-            const var_name = extractVarName(inner[i + 1 ..]);
-            if (var_name.len > 0) {
-                has_var = true;
-                if (ctx.get(var_name)) |val| {
-                    if (val.len > 0) {
-                        all_vars_empty = false;
-                    }
-                }
-                i += 1 + var_name.len;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    if (has_var and all_vars_empty) return false;
-    return true;
+    const info = inspectGroupVars(inner, ctx);
+    return !info.has_var or info.has_non_empty_var;
 }
 
 const ConditionalGroup = struct {
@@ -393,33 +397,13 @@ fn containsVarOrStyled(inner: []const u8) bool {
 }
 
 fn parseConditionalGroup(raw: []const u8, start_idx: usize) ?ConditionalGroup {
-    if (raw[start_idx] != '(') return null;
-
-    var i: usize = start_idx + 1;
-    var depth: usize = 1;
-
-    while (i < raw.len) {
-        if (raw[i] == '\\' and i + 1 < raw.len) {
-            i += 2;
-            continue;
-        }
-        if (raw[i] == '(') {
-            depth += 1;
-        } else if (raw[i] == ')') {
-            depth -= 1;
-            if (depth == 0) {
-                const inner = raw[start_idx + 1 .. i];
-                if (!containsVarOrStyled(inner)) return null;
-                return ConditionalGroup{
-                    .inner = inner,
-                    .next_index = i + 1,
-                };
-            }
-        }
-        i += 1;
-    }
-
-    return null;
+    const close_paren = parse_utils.findMatchingDelimiter(raw, start_idx, '(', ')') orelse return null;
+    const inner = raw[start_idx + 1 .. close_paren];
+    if (!containsVarOrStyled(inner)) return null;
+    return ConditionalGroup{
+        .inner = inner,
+        .next_index = close_paren + 1,
+    };
 }
 
 const TestVar = enum { user, host, price, symbol, duration, path, missing, text, version };
@@ -653,4 +637,45 @@ test "unit: conditional group wrapping styled block with $style skips when conte
     const res_non_empty = try formatTemplate(a, "([\\[$text\\]]($style) )", ctx_non_empty);
     defer a.free(res_non_empty);
     try testing.expectEqualStrings("\x1b[1;31m[!+]\x1b[0m ", res_non_empty);
+}
+
+test "unit: escape_shell prevents command injection in bash and prompt expansion in zsh" {
+    const a = testing.allocator;
+
+    const ctx_bash = FormatContext(TestVar){
+        .shell = .bash,
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .path, .value = "~/dir$(id)`uname`", .escape_shell = true },
+        },
+    };
+    const res_bash = try formatTemplate(a, "[$path](cyan)", ctx_bash);
+    defer a.free(res_bash);
+    try testing.expectEqualStrings("\x01\x1b[36m\x02~/dir\\$(id)\\`uname\\`\x01\x1b[0m\x02", res_bash);
+
+    const ctx_zsh = FormatContext(TestVar){
+        .shell = .zsh,
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .path, .value = "~/100%F{red}$(id)", .escape_shell = true },
+        },
+    };
+    const res_zsh = try formatTemplate(a, "[$path](cyan)", ctx_zsh);
+    defer a.free(res_zsh);
+    try testing.expectEqualStrings("%{\x1b[36m%}~/100%%F{red}\\$(id)%{\x1b[0m%}", res_zsh);
+}
+
+test "unit: truncated BufferWriter preserves balanced ANSI reset and shell zero-width markers" {
+    const Fixture = @import("../tests/fixture.zig").Fixture;
+    var small_buf: [24]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&small_buf, &pos);
+
+    const ctx = FormatContext(TestVar){
+        .shell = .bash,
+        .vars = &[_]Variable(TestVar){
+            .{ .name = .path, .value = "very_long_directory_name_exceeding_buffer" },
+        },
+    };
+    try formatTemplateWriter(writer, "[$path](bold cyan)", ctx);
+    try Fixture.assertValidShellAnsi(small_buf[0..pos], .bash);
+    try testing.expect(std.mem.endsWith(u8, small_buf[0..pos], "\x01\x1b[0m\x02"));
 }
