@@ -107,11 +107,7 @@ pub fn installHook(
 
     if (file_exists and existing_opt == null) {
         // Distinguish an empty 0-byte file from an unreadable existing file
-        const open_res = if (std.fs.path.isAbsolute(config_path))
-            std.Io.Dir.openFileAbsolute(io, config_path, .{})
-        else
-            std.Io.Dir.cwd().openFile(io, config_path, .{});
-        if (open_res) |f| {
+        if (fs.openFile(io, config_path, .{})) |f| {
             f.close(io);
         } else |err| {
             try writer.print("✖ Error: failed to read existing config file '{s}': {any}\n", .{ config_path, err });
@@ -160,12 +156,7 @@ pub fn installHook(
     const append_snippet = std.fmt.bufPrint(&append_buf, "\n# Zap prompt hook\n{s}\n", .{hook_cmd}) catch return false;
 
     // Write / append to configuration file
-    const write_file_res = if (std.fs.path.isAbsolute(config_path))
-        std.Io.Dir.createFileAbsolute(io, config_path, .{})
-    else
-        std.Io.Dir.cwd().createFile(io, config_path, .{});
-
-    if (write_file_res) |wf| {
+    if (fs.createFile(io, config_path, .{})) |wf| {
         var write_file = wf;
         defer write_file.close(io);
         if (existing_len > 0) {

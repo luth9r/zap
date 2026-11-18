@@ -7,6 +7,7 @@ pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
 pub const is_git_dependent: bool = true;
+pub const needs_git_status: bool = true;
 
 pub const Var = enum { branch, remote_branch, symbol };
 

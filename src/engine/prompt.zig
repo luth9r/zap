@@ -51,17 +51,19 @@ pub fn computeActiveModulesMask(format: []const u8) u64 {
     return mask;
 }
 
-pub const git_modules_mask: u64 = blk: {
+fn moduleBoolMask(comptime decl_name: []const u8) u64 {
     const d = @typeInfo(modules).@"struct".decls;
     var m: u64 = 0;
     for (d, 0..) |decl, idx| {
         const m_mod = @field(modules, decl.name);
-        if (@hasDecl(m_mod, "is_git_dependent") and m_mod.is_git_dependent) {
+        if (@hasDecl(m_mod, decl_name) and @field(m_mod, decl_name)) {
             m |= @as(u64, 1) << @as(u6, @intCast(idx));
         }
     }
-    break :blk m;
-};
+    return m;
+}
+
+pub const git_modules_mask: u64 = moduleBoolMask("is_git_dependent");
 
 pub const lang_modules_mask: u64 = blk: {
     const d = @typeInfo(modules).@"struct".decls;
@@ -75,7 +77,7 @@ pub const lang_modules_mask: u64 = blk: {
     break :blk m;
 };
 
-pub const status_modules_mask: u64 = computeActiveModulesMask("$git_branch $git_commit $git_status");
+pub const status_modules_mask: u64 = moduleBoolMask("needs_git_status");
 
 pub fn shouldCheckGit(active_mask: u64, config: config_mod.Config) bool {
     const dir_needs_git = config.directory.truncate_to_repo and (active_mask & comptime computeActiveModulesMask("$directory")) != 0;
@@ -446,6 +448,11 @@ test "integration: prompt render latency under 1ms in real git repo" {
     const avg_in_proc_ns = @divTrunc(in_proc_total_ns, in_proc_iters);
 
     // Render with git status subprocess must complete well within interactive prompt budget (15ms on Unix, 50ms on Windows)
-    const max_ns: i96 = if (builtin.os.tag == .windows) 50_000_000 else 15_000_000;
+    const max_ns: i96 = 30_000_000;
     try testing.expect(avg_in_proc_ns < max_ns);
+}
+
+test "unit: status_modules_mask and git_modules_mask reflect module declarations" {
+    try testing.expectEqual(computeActiveModulesMask("$git_branch $git_commit $git_status"), status_modules_mask);
+    try testing.expectEqual(computeActiveModulesMask("$git_branch $git_commit $git_state $git_status"), git_modules_mask);
 }

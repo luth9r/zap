@@ -5,6 +5,7 @@ const style_mod = @import("../engine/style.zig");
 const toml_parser = @import("toml_parser.zig");
 const prompt_engine = @import("../engine/prompt.zig");
 const parse_utils = @import("../utils/parse_utils.zig");
+const fs = @import("../utils/fs.zig");
 const extractVarName = parse_utils.extractVarName;
 
 pub const ValidationResult = struct {
@@ -152,212 +153,95 @@ pub fn validateContent(
     content: []const u8,
     file_display: []const u8,
 ) !ValidationResult {
-    var res = ValidationResult{};
-    var line_it = std.mem.splitScalar(u8, content, '\n');
-    var line_num: usize = 0;
-    var current_section: ?[]const u8 = null;
+    const WriterType = @TypeOf(writer);
+    const ValidateHandler = struct {
+        writer: WriterType,
+        file_display: []const u8,
+        res: *ValidationResult,
+        last_unknown_inline_line: usize = 0,
 
-    while (line_it.next()) |raw_line| {
-        line_num += 1;
-        const line = std.mem.trim(u8, raw_line, " \t\r");
-        if (line.len == 0 or line[0] == '#') continue;
-
-        // Section header check
-        if (line[0] == '[') {
-            const clean_sec_line = toml_parser.stripInlineComment(line);
-            if (clean_sec_line.len < 2 or clean_sec_line[clean_sec_line.len - 1] != ']') {
-                try writer.print("✖ Error [{s}:{d}]: unclosed section header '{s}'\n", .{
-                    file_display,
+        fn reportUnknownInlineSection(self: *@This(), line_num: usize, target_sec: []const u8) !void {
+            if (self.last_unknown_inline_line != line_num) {
+                self.last_unknown_inline_line = line_num;
+                try self.writer.print("✖ Error [{s}:{d}]: unknown section '{s}' in inline table\n", .{
+                    self.file_display,
                     line_num,
-                    line,
+                    target_sec,
                 });
-                res.error_count += 1;
-                continue;
-            }
-
-            const sec_name = std.mem.trim(u8, clean_sec_line[1 .. clean_sec_line.len - 1], " \t");
-            if (sec_name.len == 0) {
-                try writer.print("✖ Error [{s}:{d}]: empty section header '[]'\n", .{
-                    file_display,
-                    line_num,
-                });
-                res.error_count += 1;
-                continue;
-            }
-
-            // Check if section name is registered module
-            if (std.meta.stringToEnum(prompt_engine.ModuleVar, sec_name) == null) {
-                try writer.print("✖ Error [{s}:{d}]: unknown section '[{s}]'\n", .{
-                    file_display,
-                    line_num,
-                    sec_name,
-                });
-                res.error_count += 1;
-            }
-
-            current_section = sec_name;
-            continue;
-        }
-
-        // Key-value pair check
-        const kv = toml_parser.splitKeyVal(line) orelse {
-            try writer.print("✖ Error [{s}:{d}]: syntax error, expected 'key = value', got '{s}'\n", .{
-                file_display,
-                line_num,
-                line,
-            });
-            res.error_count += 1;
-            continue;
-        };
-        const key = kv.key;
-        var val = kv.val;
-
-        // Handle multiline strings
-        if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
-            const quote_type = val[0..3];
-            const after_open = val[3..];
-            const has_closing = (after_open.len >= 3 and std.mem.endsWith(u8, after_open, quote_type)) or
-                (std.mem.indexOf(u8, content[(@intFromPtr(after_open.ptr) - @intFromPtr(content.ptr))..], quote_type) != null);
-            if (!has_closing) {
-                try writer.print("✖ Error [{s}:{d}]: unclosed multiline quote in value for '{s}'\n", .{
-                    file_display,
-                    line_num,
-                    key,
-                });
-                res.error_count += 1;
-                break;
-            }
-            val = toml_parser.extractMultilineValue(val, content, &line_it);
-        } else {
-            val = toml_parser.stripInlineComment(val);
-
-            // Handle TOML inline tables: key = { k1 = "v1", k2 = 123 }
-            if (val.len > 0 and val[0] == '{') {
-                if (val.len < 2 or val[val.len - 1] != '}') {
-                    try writer.print("✖ Error [{s}:{d}]: unclosed inline table '{{' for '{s}'\n", .{
-                        file_display,
-                        line_num,
-                        key,
-                    });
-                    res.error_count += 1;
-                    continue;
-                }
-                const target_sec = if (std.meta.stringToEnum(prompt_engine.ModuleVar, key) != null) key else (current_section orelse key);
-                const inner = std.mem.trim(u8, val[1 .. val.len - 1], " \t\r");
-                try validateInlineTable(writer, target_sec, inner, file_display, line_num, &res);
-                continue;
-            }
-
-            // Check for unclosed single-line quotes
-            if (val.len > 0) {
-                const quote_char = val[0];
-                if (quote_char == '"' or quote_char == '\'') {
-                    const is_escaped_end = quote_char == '"' and hasOddTrailingBackslashes(val[1 .. val.len - 1]);
-                    if (val.len < 2 or val[val.len - 1] != quote_char or is_escaped_end) {
-                        try writer.print("✖ Error [{s}:{d}]: unclosed quote in value for '{s}'\n", .{
-                            file_display,
-                            line_num,
-                            key,
-                        });
-                        res.error_count += 1;
-                        continue;
-                    }
-                    val = val[1 .. val.len - 1];
-                }
+                self.res.error_count += 1;
             }
         }
 
-        // Validate key and value
-        if (current_section) |sec| {
-            try validateSectionProperty(writer, sec, key, val, file_display, line_num, &res);
-        } else {
-            try validateRootProperty(writer, key, val, file_display, line_num, &res);
-        }
-    }
-
-    return res;
-}
-
-fn hasOddTrailingBackslashes(slice: []const u8) bool {
-    var count: usize = 0;
-    var i: usize = slice.len;
-    while (i > 0) {
-        i -= 1;
-        if (slice[i] == '\\') {
-            count += 1;
-        } else {
-            break;
-        }
-    }
-    return (count % 2) == 1;
-}
-
-fn validateInlineTable(
-    writer: anytype,
-    target_section: []const u8,
-    content_inside: []const u8,
-    file_display: []const u8,
-    line_num: usize,
-    res: *ValidationResult,
-) !void {
-    if (std.meta.stringToEnum(prompt_engine.ModuleVar, target_section) == null) {
-        try writer.print("✖ Error [{s}:{d}]: unknown section '{s}' in inline table\n", .{
-            file_display,
-            line_num,
-            target_section,
-        });
-        res.error_count += 1;
-        return;
-    }
-
-    var it = toml_parser.InlineTableIterator.init(content_inside);
-    while (it.next()) |pair| {
-        try validateInlinePair(writer, target_section, pair, file_display, line_num, res);
-    }
-}
-
-fn validateInlinePair(
-    writer: anytype,
-    target_section: []const u8,
-    item: []const u8,
-    file_display: []const u8,
-    line_num: usize,
-    res: *ValidationResult,
-) !void {
-    const trimmed_item = std.mem.trim(u8, item, " \t\r");
-    if (trimmed_item.len == 0) return;
-
-    const kv = toml_parser.splitKeyVal(trimmed_item) orelse {
-        try writer.print("✖ Error [{s}:{d}]: syntax error in inline table [{s}], expected 'key = value', got '{s}'\n", .{
-            file_display,
-            line_num,
-            target_section,
-            trimmed_item,
-        });
-        res.error_count += 1;
-        return;
-    };
-    const k = kv.key;
-    var v = kv.val;
-
-    if (v.len > 0) {
-        const q = v[0];
-        if (q == '"' or q == '\'') {
-            if (v.len < 2 or v[v.len - 1] != q) {
-                try writer.print("✖ Error [{s}:{d}]: unclosed quote in inline table [{s}] for '{s}'\n", .{
-                    file_display,
+        pub fn onSection(self: *@This(), line_num: usize, sec: []const u8) !void {
+            if (std.meta.stringToEnum(prompt_engine.ModuleVar, sec) == null) {
+                try self.writer.print("✖ Error [{s}:{d}]: unknown section '[{s}]'\n", .{
+                    self.file_display,
                     line_num,
-                    target_section,
-                    k,
+                    sec,
                 });
-                res.error_count += 1;
+                self.res.error_count += 1;
+            }
+        }
+
+        pub fn onSyntaxError(self: *@This(), line_num: usize, err: toml_parser.TomlSyntaxError, token: []const u8) !void {
+            switch (err) {
+                .unclosed_section => try self.writer.print("✖ Error [{s}:{d}]: unclosed section header '{s}'\n", .{ self.file_display, line_num, token }),
+                .empty_section => try self.writer.print("✖ Error [{s}:{d}]: empty section header '[]'\n", .{ self.file_display, line_num }),
+                .expected_key_val => try self.writer.print("✖ Error [{s}:{d}]: syntax error, expected 'key = value', got '{s}'\n", .{ self.file_display, line_num, token }),
+                .unclosed_multiline => try self.writer.print("✖ Error [{s}:{d}]: unclosed multiline quote in value for '{s}'\n", .{ self.file_display, line_num, token }),
+                .unclosed_inline_table => try self.writer.print("✖ Error [{s}:{d}]: unclosed inline table '{{' for '{s}'\n", .{ self.file_display, line_num, token }),
+                .unclosed_quote => try self.writer.print("✖ Error [{s}:{d}]: unclosed quote in value for '{s}'\n", .{ self.file_display, line_num, token }),
+            }
+            self.res.error_count += 1;
+        }
+
+        pub fn onInlineError(self: *@This(), line_num: usize, target_sec: []const u8, err: toml_parser.TomlInlineError, token: []const u8) !void {
+            if (std.meta.stringToEnum(prompt_engine.ModuleVar, target_sec) == null) {
+                try self.reportUnknownInlineSection(line_num, target_sec);
                 return;
             }
-            v = v[1 .. v.len - 1];
+            switch (err) {
+                .expected_key_val => try self.writer.print("✖ Error [{s}:{d}]: syntax error in inline table [{s}], expected 'key = value', got '{s}'\n", .{
+                    self.file_display,
+                    line_num,
+                    target_sec,
+                    token,
+                }),
+                .unclosed_quote => try self.writer.print("✖ Error [{s}:{d}]: unclosed quote in inline table [{s}] for '{s}'\n", .{
+                    self.file_display,
+                    line_num,
+                    target_sec,
+                    token,
+                }),
+            }
+            self.res.error_count += 1;
         }
-    }
 
-    try validateSectionProperty(writer, target_section, k, v, file_display, line_num, res);
+        pub fn onKeyValue(self: *@This(), line_num: usize, section: ?[]const u8, key: []const u8, val: []const u8) !void {
+            if (section) |sec| {
+                try validateSectionProperty(self.writer, sec, key, val, self.file_display, line_num, self.res);
+            } else {
+                try validateRootProperty(self.writer, key, val, self.file_display, line_num, self.res);
+            }
+        }
+
+        pub fn onInlineKeyValue(self: *@This(), line_num: usize, target_sec: []const u8, key: []const u8, val: []const u8) !void {
+            if (std.meta.stringToEnum(prompt_engine.ModuleVar, target_sec) == null) {
+                try self.reportUnknownInlineSection(line_num, target_sec);
+                return;
+            }
+            try validateSectionProperty(self.writer, target_sec, key, val, self.file_display, line_num, self.res);
+        }
+    };
+
+    var res = ValidationResult{};
+    var handler = ValidateHandler{
+        .writer = writer,
+        .file_display = file_display,
+        .res = &res,
+    };
+    try toml_parser.scanToml(content, &handler);
+    return res;
 }
 
 fn validateRootProperty(
@@ -542,16 +426,10 @@ pub fn validateFile(
     path: []const u8,
     writer: anytype,
 ) !ValidationResult {
-    const file = if (std.fs.path.isAbsolute(path))
-        std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| {
-            try writer.print("✖ Error: failed to open config file '{s}': {any}\n", .{ path, err });
-            return ValidationResult{ .error_count = 1 };
-        }
-    else
-        std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| {
-            try writer.print("✖ Error: failed to open config file '{s}': {any}\n", .{ path, err });
-            return ValidationResult{ .error_count = 1 };
-        };
+    const file = fs.openFile(io, path, .{}) catch |err| {
+        try writer.print("✖ Error: failed to open config file '{s}': {any}\n", .{ path, err });
+        return ValidationResult{ .error_count = 1 };
+    };
     defer file.close(io);
 
     var content_buf: [64 * 1024]u8 = undefined;

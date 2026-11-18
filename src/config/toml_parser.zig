@@ -119,44 +119,147 @@ pub fn extractMultilineValue(val: []const u8, content: []const u8, line_it: *std
     return val;
 }
 
-/// Parses TOML content directly into Config without heap allocations using comptime reflection.
-pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
+pub const TomlSyntaxError = enum {
+    unclosed_section,
+    empty_section,
+    expected_key_val,
+    unclosed_multiline,
+    unclosed_inline_table,
+    unclosed_quote,
+};
+
+pub const TomlInlineError = enum {
+    expected_key_val,
+    unclosed_quote,
+};
+
+pub fn hasOddTrailingBackslashes(slice: []const u8) bool {
+    var count: usize = 0;
+    var i: usize = slice.len;
+    while (i > 0) {
+        i -= 1;
+        if (slice[i] == '\\') {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    return (count % 2) == 1;
+}
+
+/// Unquotes a single-line TOML value, returning `null` if it starts with a quote that is not properly closed.
+pub fn unquoteChecked(val: []const u8) ?[]const u8 {
+    if (val.len == 0) return val;
+    const q = val[0];
+    if (q == '"' or q == '\'') {
+        if (val.len < 2 or val[val.len - 1] != q) return null;
+        if (q == '"' and hasOddTrailingBackslashes(val[1 .. val.len - 1])) return null;
+        return val[1 .. val.len - 1];
+    }
+    return val;
+}
+
+/// Shared zero-allocation TOML scanner used by both `parseToml` and `validator.validateContent`.
+pub fn scanToml(content: []const u8, handler: anytype) !void {
     var line_it = std.mem.splitScalar(u8, content, '\n');
+    var line_num: usize = 0;
     var current_section: ?[]const u8 = null;
 
     while (line_it.next()) |raw_line| {
+        line_num += 1;
         const line = std.mem.trim(u8, raw_line, " \t\r");
         if (line.len == 0 or line[0] == '#') continue;
 
-        if (parseSectionHeader(line)) |sec| {
+        if (line[0] == '[') {
+            const clean_sec = stripInlineComment(line);
+            if (clean_sec.len < 2 or clean_sec[clean_sec.len - 1] != ']') {
+                try handler.onSyntaxError(line_num, .unclosed_section, line);
+                continue;
+            }
+            const sec = std.mem.trim(u8, clean_sec[1 .. clean_sec.len - 1], " \t");
+            if (sec.len == 0) {
+                try handler.onSyntaxError(line_num, .empty_section, line);
+                continue;
+            }
             current_section = sec;
+            try handler.onSection(line_num, sec);
             continue;
         }
 
-        if (splitKeyVal(line)) |kv| {
-            const key = kv.key;
-            var val = kv.val;
+        const kv = splitKeyVal(line) orelse {
+            try handler.onSyntaxError(line_num, .expected_key_val, line);
+            continue;
+        };
+        const key = kv.key;
+        var val = kv.val;
 
-            if (std.mem.eql(u8, key, "$schema")) continue;
+        if (std.mem.eql(u8, key, "$schema")) continue;
 
-            if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
-                val = extractMultilineValue(val, content, &line_it);
-            } else {
-                const clean_val = stripInlineComment(val);
-                // Support TOML inline tables: key = { k1 = "v1", k2 = 123 }
-                if (clean_val.len >= 2 and clean_val[0] == '{' and clean_val[clean_val.len - 1] == '}') {
-                    const inner = std.mem.trim(u8, clean_val[1 .. clean_val.len - 1], " \t\r");
-                    const is_mod_key = @hasField(config_mod.Config, "directory") and isConfigSectionField(key);
-                    const target_sec = if (is_mod_key) key else (current_section orelse key);
-                    parseInlineTable(config, target_sec, inner);
-                    continue;
-                }
-                val = unquoteRaw(clean_val);
+        if (val.len >= 3 and (std.mem.startsWith(u8, val, "\"\"\"") or std.mem.startsWith(u8, val, "'''"))) {
+            const quote_type = val[0..3];
+            const after_open = val[3..];
+            const has_closing = (after_open.len >= 3 and std.mem.endsWith(u8, after_open, quote_type)) or
+                (std.mem.indexOf(u8, content[(@intFromPtr(after_open.ptr) - @intFromPtr(content.ptr))..], quote_type) != null);
+            if (!has_closing) {
+                try handler.onSyntaxError(line_num, .unclosed_multiline, key);
+                break;
             }
-
-            applyValue(config, current_section, key, val);
+            val = extractMultilineValue(val, content, &line_it);
+            try handler.onKeyValue(line_num, current_section, key, val);
+            continue;
         }
+
+        const clean_val = stripInlineComment(val);
+        if (clean_val.len > 0 and clean_val[0] == '{') {
+            if (clean_val.len < 2 or clean_val[clean_val.len - 1] != '}') {
+                try handler.onSyntaxError(line_num, .unclosed_inline_table, key);
+                continue;
+            }
+            const target_sec = if (isConfigSectionField(key)) key else (current_section orelse key);
+            const inner = std.mem.trim(u8, clean_val[1 .. clean_val.len - 1], " \t\r");
+            var it = InlineTableIterator.init(inner);
+            while (it.next()) |pair| {
+                const trimmed_item = std.mem.trim(u8, pair, " \t\r");
+                if (trimmed_item.len == 0) continue;
+                const item_kv = splitKeyVal(trimmed_item) orelse {
+                    try handler.onInlineError(line_num, target_sec, .expected_key_val, trimmed_item);
+                    continue;
+                };
+                const unquoted_v = unquoteChecked(item_kv.val) orelse {
+                    try handler.onInlineError(line_num, target_sec, .unclosed_quote, item_kv.key);
+                    continue;
+                };
+                try handler.onInlineKeyValue(line_num, target_sec, item_kv.key, unquoted_v);
+            }
+            continue;
+        }
+
+        const unquoted_val = unquoteChecked(clean_val) orelse {
+            try handler.onSyntaxError(line_num, .unclosed_quote, key);
+            continue;
+        };
+        try handler.onKeyValue(line_num, current_section, key, unquoted_val);
     }
+}
+
+/// Parses TOML content directly into Config without heap allocations using comptime reflection.
+pub fn parseToml(config: *config_mod.Config, content: []const u8) void {
+    const Handler = struct {
+        cfg: *config_mod.Config,
+
+        pub fn onSection(_: @This(), _: usize, _: []const u8) !void {}
+        pub fn onSyntaxError(_: @This(), _: usize, _: TomlSyntaxError, _: []const u8) !void {}
+        pub fn onInlineError(_: @This(), _: usize, _: []const u8, _: TomlInlineError, _: []const u8) !void {}
+
+        pub fn onKeyValue(self: @This(), _: usize, section: ?[]const u8, key: []const u8, val: []const u8) !void {
+            applyValue(self.cfg, section, key, val);
+        }
+
+        pub fn onInlineKeyValue(self: @This(), _: usize, target_sec: []const u8, key: []const u8, val: []const u8) !void {
+            applyValue(self.cfg, target_sec, key, val);
+        }
+    };
+    scanToml(content, Handler{ .cfg = config }) catch {};
 }
 
 /// Quote-aware iterator over comma-separated `key = value` pairs inside a TOML inline table.
@@ -199,21 +302,6 @@ pub const InlineTableIterator = struct {
         return self.content[pair_start..];
     }
 };
-
-fn parseInlineTable(config: *config_mod.Config, target_section: []const u8, content_inside: []const u8) void {
-    var it = InlineTableIterator.init(content_inside);
-    while (it.next()) |pair| {
-        parseAndApplyPair(config, target_section, pair);
-    }
-}
-
-fn parseAndApplyPair(config: *config_mod.Config, target_section: []const u8, item: []const u8) void {
-    const trimmed_item = std.mem.trim(u8, item, " \t\r");
-    if (trimmed_item.len == 0) return;
-    if (splitKeyVal(trimmed_item)) |kv| {
-        applyValue(config, target_section, kv.key, unquoteValue(kv.val));
-    }
-}
 
 fn applyGenericField(ptr: anytype, key: []const u8, val: []const u8) void {
     const PtrType = @TypeOf(ptr);
@@ -327,7 +415,7 @@ fn firstExistingInParts(
     for (CONFIG_CANDIDATES) |filename| {
         parts_buf[prefix_parts.len] = filename;
         if (platform.joinParts(buf, parts_buf[0 .. prefix_parts.len + 1])) |candidate| {
-            if (platform.fileExistsAbsolute(io, candidate)) return candidate;
+            if (fs.fileExists(io, candidate)) return candidate;
         }
     }
     return null;
@@ -616,4 +704,61 @@ test "unit: parse section header and inline table with trailing inline comments"
 
     try std.testing.expectEqual(@as(usize, 2), cfg.directory.truncation_length);
     try std.testing.expectEqualStrings("BR ", cfg.git_branch.symbol);
+}
+
+test "unit: unquoteChecked handles valid, escaped, and single-quote edge cases" {
+    try std.testing.expectEqualStrings("hello", unquoteChecked("\"hello\"").?);
+    try std.testing.expectEqualStrings("hello", unquoteChecked("'hello'").?);
+    try std.testing.expectEqualStrings("a\\\\", unquoteChecked("\"a\\\\\"").?);
+    try std.testing.expectEqualStrings("123", unquoteChecked("123").?);
+    try std.testing.expectEqualStrings("", unquoteChecked("").?);
+
+    // Unclosed quotes (including single-char quote that previously risked slice-out-of-bounds)
+    try std.testing.expect(unquoteChecked("\"") == null);
+    try std.testing.expect(unquoteChecked("'") == null);
+    try std.testing.expect(unquoteChecked("\"unclosed") == null);
+    try std.testing.expect(unquoteChecked("\"escaped\\\"") == null);
+}
+
+test "unit: scanToml dispatches sections, pairs, inline tables, and syntax errors" {
+    const CountingHandler = struct {
+        sections: usize = 0,
+        kvs: usize = 0,
+        inline_kvs: usize = 0,
+        syntax_errors: usize = 0,
+        inline_errors: usize = 0,
+
+        pub fn onSection(self: *@This(), _: usize, _: []const u8) !void {
+            self.sections += 1;
+        }
+        pub fn onKeyValue(self: *@This(), _: usize, _: ?[]const u8, _: []const u8, _: []const u8) !void {
+            self.kvs += 1;
+        }
+        pub fn onInlineKeyValue(self: *@This(), _: usize, _: []const u8, _: []const u8, _: []const u8) !void {
+            self.inline_kvs += 1;
+        }
+        pub fn onSyntaxError(self: *@This(), _: usize, _: TomlSyntaxError, _: []const u8) !void {
+            self.syntax_errors += 1;
+        }
+        pub fn onInlineError(self: *@This(), _: usize, _: []const u8, _: TomlInlineError, _: []const u8) !void {
+            self.inline_errors += 1;
+        }
+    };
+
+    const sample =
+        \\format = "$directory"
+        \\[directory]
+        \\style = "bold cyan"
+        \\character = { success_symbol = "OK", bad_pair }
+        \\broken_line
+    ;
+
+    var handler = CountingHandler{};
+    try scanToml(sample, &handler);
+
+    try std.testing.expectEqual(@as(usize, 1), handler.sections);
+    try std.testing.expectEqual(@as(usize, 2), handler.kvs);
+    try std.testing.expectEqual(@as(usize, 1), handler.inline_kvs);
+    try std.testing.expectEqual(@as(usize, 1), handler.inline_errors);
+    try std.testing.expectEqual(@as(usize, 1), handler.syntax_errors);
 }

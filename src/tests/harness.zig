@@ -159,7 +159,7 @@ pub const Harness = struct {
 
         var exclude_buf: [std.fs.max_path_bytes]u8 = undefined;
         const exclude_path = platform.joinPath(&exclude_buf, tpl_path, ".git/info/exclude") orelse return error.NameTooLong;
-        try fs.writeFileAbsolute(io, exclude_path, "config.toml\n");
+        try fs.writeFile(io, exclude_path, "config.toml\n");
 
         try self.run(&.{ "git", "-C", tpl_path, "commit", "--allow-empty", "-m", "initial" });
 
@@ -244,7 +244,7 @@ pub const Harness = struct {
     /// ```
     pub fn writeFile(self: *Harness, rel_path: []const u8, content: []const u8) !void {
         const full_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}/{s}", .{ self.tmp_dir, rel_path });
-        try fs.writeFileAbsolute(std.testing.io, full_path, content);
+        try fs.writeFile(std.testing.io, full_path, content);
     }
 
     /// Delete a file inside the test directory.

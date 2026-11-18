@@ -6,6 +6,8 @@ const BufferWriter = @import("../../../utils/buffer_writer.zig").BufferWriter;
 pub const PromptContext = @import("../../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../../engine/context.zig").DebugContext;
 
+pub const needs_git_status: bool = true;
+
 pub const Var = enum { staged, stashed, modified, renamed, conflicted, all_status, deleted, untracked, ahead_behind, up_to_date };
 
 pub const GitStatusConfig = struct {

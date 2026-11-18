@@ -3,30 +3,54 @@ const platform = @import("platform.zig");
 
 pub const testTempSubdir = platform.testTempSubdir;
 
+/// Checks access to an absolute or relative path.
+pub fn access(io: std.Io, path: []const u8, options: std.Io.Dir.AccessOptions) !void {
+    if (path.len == 0) return error.FileNotFound;
+    if (std.fs.path.isAbsolute(path)) {
+        try std.Io.Dir.accessAbsolute(io, path, options);
+    } else {
+        try std.Io.Dir.cwd().access(io, path, options);
+    }
+}
+
+/// Opens an existing file at an absolute or relative path.
+pub fn openFile(io: std.Io, path: []const u8, flags: std.Io.File.OpenFlags) !std.Io.File {
+    if (path.len == 0) return error.FileNotFound;
+    return if (std.fs.path.isAbsolute(path))
+        try std.Io.Dir.openFileAbsolute(io, path, flags)
+    else
+        try std.Io.Dir.cwd().openFile(io, path, flags);
+}
+
+/// Creates or truncates a file at an absolute or relative path.
+pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.File.CreateFlags) !std.Io.File {
+    if (path.len == 0) return error.FileNotFound;
+    return if (std.fs.path.isAbsolute(path))
+        try std.Io.Dir.createFileAbsolute(io, path, flags)
+    else
+        try std.Io.Dir.cwd().createFile(io, path, flags);
+}
+
+/// Opens a directory at an absolute or relative path.
+pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !std.Io.Dir {
+    if (path.len == 0) return error.FileNotFound;
+    return if (std.fs.path.isAbsolute(path))
+        try std.Io.Dir.openDirAbsolute(io, path, options)
+    else
+        try std.Io.Dir.cwd().openDir(io, path, options);
+}
+
 /// Checks if a file exists at the given path using fast access check.
 pub fn fileExists(io: std.Io, path: []const u8) bool {
-    if (path.len == 0) return false;
-    if (std.fs.path.isAbsolute(path)) {
-        return platform.fileExistsAbsolute(io, path);
-    } else {
-        if (std.Io.Dir.cwd().access(io, path, .{})) |_| return true else |_| return false;
-    }
+    access(io, path, .{}) catch return false;
+    return true;
 }
 
 /// Checks if a directory exists at the given path (supports both absolute and relative paths safely).
 pub fn dirExists(io: std.Io, path: []const u8) bool {
-    if (path.len == 0) return false;
-    const dir_res = if (std.fs.path.isAbsolute(path))
-        std.Io.Dir.openDirAbsolute(io, path, .{})
-    else
-        std.Io.Dir.cwd().openDir(io, path, .{});
-    if (dir_res) |dir_handle| {
-        var d = dir_handle;
-        d.close(io);
-        return true;
-    } else |_| {
-        return false;
-    }
+    var dir = openDir(io, path, .{}) catch return false;
+    dir.close(io);
+    return true;
 }
 
 /// Returns the first matching relative subpath from `subpaths` that exists in `base_dir`.
@@ -53,10 +77,7 @@ pub fn findFirstExtensionFile(
     out_buf: []u8,
 ) ?[]const u8 {
     if (extensions.len == 0) return null;
-    var dir = if (std.fs.path.isAbsolute(dir_path))
-        std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch null
-    else
-        std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch null;
+    var dir = openDir(io, dir_path, .{ .iterate = true }) catch null;
     if (dir) |*d| {
         defer d.close(io);
         var iter = d.iterate();
@@ -153,11 +174,7 @@ pub fn scanParentDirsForFiles(
 
 /// Reads a file into `buf` (up to `buf.len` bytes), supporting both absolute and relative paths.
 pub fn readFileRaw(io: std.Io, path: []const u8, buf: []u8) ?[]const u8 {
-    if (path.len == 0) return null;
-    const file = if (std.fs.path.isAbsolute(path))
-        std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null
-    else
-        std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+    const file = openFile(io, path, .{}) catch return null;
     defer file.close(io);
     const n = platform.readStreamToBuf(io, file, buf);
     if (n == 0) return null;
@@ -236,17 +253,44 @@ pub fn writeFile(io: std.Io, path: []const u8, content: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent| {
         std.Io.Dir.cwd().createDirPath(io, parent) catch {};
     }
-    var file = if (std.fs.path.isAbsolute(path))
-        try std.Io.Dir.createFileAbsolute(io, path, .{})
-    else
-        try std.Io.Dir.cwd().createFile(io, path, .{});
+    var file = try createFile(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, content);
 }
 
-pub const writeFileAbsolute = writeFile;
-
 test "unit: fs.anySubpathExists on non-existent path returns false" {
     const io = std.testing.io;
     try std.testing.expect(!anySubpathExists(io, "/nonexistent_folder_xyz_123", &.{"file.txt"}));
+}
+
+test "unit: fs unified file and directory helpers" {
+    const io = std.testing.io;
+
+    try std.testing.expect(!fileExists(io, ""));
+    try std.testing.expect(!dirExists(io, ""));
+    try std.testing.expectError(error.FileNotFound, openFile(io, "", .{}));
+    try std.testing.expectError(error.FileNotFound, createFile(io, "", .{}));
+    try std.testing.expectError(error.FileNotFound, openDir(io, "", .{}));
+    try std.testing.expectError(error.FileNotFound, access(io, "", .{}));
+
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_dir = try testTempSubdir(&tmp_buf, "zap_test_fs_ssot");
+    std.Io.Dir.cwd().deleteTree(io, tmp_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(io, tmp_dir) catch {};
+
+    var file_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const file_path = platform.joinPath(&file_buf, tmp_dir, "nested/test.txt").?;
+    try writeFile(io, file_path, "hello zap");
+
+    try std.testing.expect(dirExists(io, tmp_dir));
+    try std.testing.expect(fileExists(io, file_path));
+
+    var dir = try openDir(io, tmp_dir, .{});
+    dir.close(io);
+
+    var file = try openFile(io, file_path, .{});
+    file.close(io);
+
+    var read_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("hello zap", readFileRaw(io, file_path, &read_buf).?);
 }

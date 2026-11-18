@@ -2,6 +2,7 @@ const std = @import("std");
 const formatter = @import("../../engine/formatter.zig");
 const path_utils = @import("../../utils/path_utils.zig");
 const parse_utils = @import("../../utils/parse_utils.zig");
+const fs = @import("../../utils/fs.zig");
 
 pub const PromptContext = @import("../../engine/context.zig").PromptContext;
 pub const DebugContext = @import("../../engine/context.zig").DebugContext;
@@ -86,11 +87,8 @@ pub fn render(
 
 fn isDirReadOnly(io: std.Io, cwd: []const u8) bool {
     if (cwd.len == 0) return false;
-    if (std.fs.path.isAbsolute(cwd)) {
-        if (std.Io.Dir.accessAbsolute(io, cwd, .{ .write = true })) |_| return false else |_| return true;
-    } else {
-        if (std.Io.Dir.cwd().access(io, cwd, .{ .write = true })) |_| return false else |_| return true;
-    }
+    fs.access(io, cwd, .{ .write = true }) catch return true;
+    return false;
 }
 
 pub fn debug(writer: anytype, dctx: DebugContext) !void {

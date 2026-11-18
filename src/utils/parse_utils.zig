@@ -60,19 +60,22 @@ pub fn skipAnsiOrShellMarker(str: []const u8, i: usize) ?usize {
     return null;
 }
 
+fn jsonEscapeSeq(c: u8) ?[]const u8 {
+    return switch (c) {
+        '\\' => "\\\\",
+        '"' => "\\\"",
+        '\n' => "\\n",
+        '\r' => "\\r",
+        '\t' => "\\t",
+        else => null,
+    };
+}
+
 /// Escapes a string for safe inclusion inside a JSON string literal into `buf`.
 pub fn escapeJsonBuf(buf: []u8, input: []const u8) []const u8 {
     var pos: usize = 0;
     for (input) |c| {
-        const esc: ?[]const u8 = switch (c) {
-            '\\' => "\\\\",
-            '"' => "\\\"",
-            '\n' => "\\n",
-            '\r' => "\\r",
-            '\t' => "\\t",
-            else => null,
-        };
-        if (esc) |s| {
+        if (jsonEscapeSeq(c)) |s| {
             if (pos + s.len > buf.len) break;
             @memcpy(buf[pos .. pos + s.len], s);
             pos += s.len;
@@ -88,13 +91,10 @@ pub fn escapeJsonBuf(buf: []u8, input: []const u8) []const u8 {
 /// Writes a JSON-escaped string directly to `writer` without heap allocations.
 pub fn writeJsonEscaped(writer: anytype, input: []const u8) !void {
     for (input) |c| {
-        switch (c) {
-            '\\' => try writer.writeAll("\\\\"),
-            '"' => try writer.writeAll("\\\""),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
+        if (jsonEscapeSeq(c)) |s| {
+            try writer.writeAll(s);
+        } else {
+            try writer.writeByte(c);
         }
     }
 }
@@ -102,6 +102,21 @@ pub fn writeJsonEscaped(writer: anytype, input: []const u8) !void {
 test "unit: escapeJsonBuf escapes quotes, backslashes, and control chars" {
     var buf: [64]u8 = undefined;
     try std.testing.expectEqualStrings("a\\\"b\\\\c\\n", escapeJsonBuf(&buf, "a\"b\\c\n"));
+}
+
+test "unit: writeJsonEscaped matches escapeJsonBuf and avoids partial escapes on truncation" {
+    const BufferWriter = @import("buffer_writer.zig").BufferWriter;
+    var w_buf: [64]u8 = undefined;
+    var pos: usize = 0;
+    const writer = BufferWriter.init(&w_buf, &pos);
+    try writeJsonEscaped(writer, "a\"b\\c\n\r\t");
+
+    var b_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings(escapeJsonBuf(&b_buf, "a\"b\\c\n\r\t"), writer.written());
+
+    // 2-byte buffer cannot fit escaped "\n" after "a" (needs 3 bytes), so it stops cleanly at "a"
+    var small_buf: [2]u8 = undefined;
+    try std.testing.expectEqualStrings("a", escapeJsonBuf(&small_buf, "a\n"));
 }
 
 test "unit: extractVarName extracts valid identifier tokens" {

@@ -240,8 +240,6 @@ fn renderStyledGroup(
     if (std.mem.startsWith(u8, trimmed_spec, "$")) {
         if (ctx.get(trimmed_spec[1..])) |val| {
             resolved_style = val;
-        } else if (std.mem.eql(u8, trimmed_spec, "$style")) {
-            resolved_style = ctx.style;
         }
     }
 

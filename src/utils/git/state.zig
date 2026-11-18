@@ -121,7 +121,7 @@ test "unit: getGitState detects merge, cherry-pick, revert, bisect" {
     // 1. Merge
     var merge_head_buf: [std.fs.max_path_bytes]u8 = undefined;
     const merge_head = try std.fmt.bufPrint(&merge_head_buf, "{s}/MERGE_HEAD", .{tmp});
-    try fs.writeFileAbsolute(io, merge_head, "1234567\n");
+    try fs.writeFile(io, merge_head, "1234567\n");
     var res = getGitState(io, tmp, &cur_buf, &tot_buf);
     try testing.expectEqual(GitStateType.merge, res.state_type);
     try std.Io.Dir.deleteFileAbsolute(io, merge_head);
@@ -129,7 +129,7 @@ test "unit: getGitState detects merge, cherry-pick, revert, bisect" {
     // 2. Cherry-pick
     var cp_head_buf: [std.fs.max_path_bytes]u8 = undefined;
     const cp_head = try std.fmt.bufPrint(&cp_head_buf, "{s}/CHERRY_PICK_HEAD", .{tmp});
-    try fs.writeFileAbsolute(io, cp_head, "1234567\n");
+    try fs.writeFile(io, cp_head, "1234567\n");
     res = getGitState(io, tmp, &cur_buf, &tot_buf);
     try testing.expectEqual(GitStateType.cherry_pick, res.state_type);
     try std.Io.Dir.deleteFileAbsolute(io, cp_head);
@@ -137,7 +137,7 @@ test "unit: getGitState detects merge, cherry-pick, revert, bisect" {
     // 3. Revert
     var rev_head_buf: [std.fs.max_path_bytes]u8 = undefined;
     const rev_head = try std.fmt.bufPrint(&rev_head_buf, "{s}/REVERT_HEAD", .{tmp});
-    try fs.writeFileAbsolute(io, rev_head, "1234567\n");
+    try fs.writeFile(io, rev_head, "1234567\n");
     res = getGitState(io, tmp, &cur_buf, &tot_buf);
     try testing.expectEqual(GitStateType.revert, res.state_type);
     try std.Io.Dir.deleteFileAbsolute(io, rev_head);
@@ -145,7 +145,7 @@ test "unit: getGitState detects merge, cherry-pick, revert, bisect" {
     // 4. Bisect
     var bisect_buf: [std.fs.max_path_bytes]u8 = undefined;
     const bisect_file = try std.fmt.bufPrint(&bisect_buf, "{s}/BISECT_LOG", .{tmp});
-    try fs.writeFileAbsolute(io, bisect_file, "git bisect start\n");
+    try fs.writeFile(io, bisect_file, "git bisect start\n");
     res = getGitState(io, tmp, &cur_buf, &tot_buf);
     try testing.expectEqual(GitStateType.bisect, res.state_type);
 }
@@ -163,11 +163,11 @@ test "unit: getGitState detects rebase-merge with progress steps" {
 
     var msgnum_buf: [std.fs.max_path_bytes]u8 = undefined;
     const msgnum_path = try std.fmt.bufPrint(&msgnum_buf, "{s}/rebase-merge/msgnum", .{tmp});
-    try fs.writeFileAbsolute(io, msgnum_path, "2\n");
+    try fs.writeFile(io, msgnum_path, "2\n");
 
     var end_buf: [std.fs.max_path_bytes]u8 = undefined;
     const end_path = try std.fmt.bufPrint(&end_buf, "{s}/rebase-merge/end", .{tmp});
-    try fs.writeFileAbsolute(io, end_path, "5\n");
+    try fs.writeFile(io, end_path, "5\n");
 
     const res = getGitState(io, tmp, &cur_buf, &tot_buf);
     try testing.expectEqual(GitStateType.rebase, res.state_type);
